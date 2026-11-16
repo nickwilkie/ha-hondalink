@@ -33,6 +33,7 @@ Usage:
   python3 hondalink_dump.py --integration-dir ... --vin <VIN> --wake
   python3 hondalink_dump.py --integration-dir ... --probe
   python3 hondalink_dump.py --integration-dir ... --start-climate saved
+  python3 hondalink_dump.py --integration-dir ... --start-climate plain
   python3 hondalink_dump.py --integration-dir ... --start-climate 72 --defrost-front on
 
 --probe tries 20 read-only endpoints on Honda's servers, using the HTTP method the app
@@ -43,9 +44,15 @@ expect most attempts to fail; probe_summary.txt shows which ones didn't.
 --start-climate REMOTE-STARTS THE CAR with a climate block attached, to find out whether
 Honda accepts it. Only run it with the car outdoors and where you can see it. Give it
 "saved" (send what the app would, from the settings saved in your profile), a temperature
-in whole degrees F, or "none" (defroster only); --defrost-front / --defrost-rear add the
-defroster values. You are shown the exact request and must type START to send it, and the
-script offers to stop the engine afterwards. --climate-now sends the app's Climate
+in whole degrees F, "none" (defroster only) or "plain" (no climate block: the start the
+integration already sends, as a control); --defrost-front / --defrost-rear add the
+defroster values. --start-extra JSON merges more fields into the request, to try other
+body shapes without editing code, e.g.
+  --start-climate 72 --start-extra '{"command": "Start", "isChanged": true, "filters": []}'
+  --start-climate plain --start-extra '{"vehicleControl": {"acSetting": {"acTempVal": "04"}}}'
+You are shown the exact request and must type START to send it. If Honda refuses it, the
+script offers to send the plain start as a control, and it offers to stop the engine
+afterwards. --climate-now sends the app's Climate
 Settings "Update" command, which may also start the climate system, with the same
 confirmation. Both need the remote PIN (HONDALINK_PIN, or you are prompted).
 
@@ -96,6 +103,9 @@ SAFE_KEYS = {
     "plugstatus", "lightstate", "openstate", "closestate", "lockstate",
     "pressuredata", "deviceid_type", "commandstatus",
 }
+# Secret-looking keys that hold a list/dict worth looking inside (each field in it is still
+# redacted by the rules above). The whole myProfile reply sits under "devices".
+CONTAINER_KEYS = {"devices"}
 VIN_RE = re.compile(r"\b[A-HJ-NPR-Z0-9]{17}\b")
 
 class Probe(NamedTuple):
@@ -189,6 +199,7 @@ def is_secret_key(key: str) -> bool:
 def redact(value: Any, vins: set[str], keep: frozenset[str] = frozenset()) -> Any:
     if isinstance(value, dict):
         return {k: ("**REDACTED**" if is_secret_key(str(k)) and str(k) not in keep and v not in (None, "", [], {})
+                    and not (str(k).lower() in CONTAINER_KEYS and isinstance(v, (dict, list)))
                     else redact(v, vins, keep))
                 for k, v in value.items()}
     if isinstance(value, list):
@@ -345,6 +356,8 @@ def temperature_problem(ac_setting: dict[str, str] | None) -> str | None:
 def start_climate_setting(args: argparse.Namespace, util_mod, summary: dict[str, Any] | None) -> dict[str, str] | None:
     """The acSetting block for --start-climate; exits with a message if it can't be built."""
     choice = args.start_climate.strip().lower()
+    if choice == "plain":
+        return None
     if choice == "saved":
         setting = dict((summary or {}).get("app_would_send_acSetting") or {})
         if not setting:
@@ -360,13 +373,33 @@ def start_climate_setting(args: argparse.Namespace, util_mod, summary: dict[str,
         try:
             temperature = int(choice)
         except ValueError:
-            raise SystemExit('--start-climate takes "saved", "none" or a whole temperature in F, e.g. 72.') from None
+            raise SystemExit('--start-climate takes "saved", "none", "plain" or a whole temperature in F, e.g. 72.') from None
     setting = util_mod.build_ac_setting(
         temperature=temperature, unit="F", defrost_front=args.defrost_front, defrost_rear=args.defrost_rear
     )
     if not setting:
         raise SystemExit("--start-climate none needs --defrost-front and/or --defrost-rear.")
     return setting
+
+
+def merge(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
+    """base with extra laid over it; dicts are merged key by key."""
+    out = dict(base)
+    for key, value in extra.items():
+        out[key] = merge(out[key], value) if isinstance(out.get(key), dict) and isinstance(value, dict) else value
+    return out
+
+
+def start_request(setting: dict[str, str] | None, extra: dict[str, Any] | None) -> dict[str, Any]:
+    """The engine-start body without the VIN and PIN."""
+    request: dict[str, Any] = {"extend": False}
+    if setting:
+        request["vehicleControl"] = {"acSetting": setting}
+    return merge(request, extra or {})
+
+
+def send_start(api, request: dict[str, Any]):
+    return api._async_cig_command("eng", "srt", {"device": api._vin(), "pin": api._pin(), **request})
 
 
 def confirm(question: str, word: str) -> bool:
@@ -387,8 +420,13 @@ def status_snapshot(util_mod, dashboard: Any) -> dict[str, Any]:
     }
 
 
-async def send_command(api, util_mod, label: str, request: dict[str, Any], send, *, offer_stop: bool) -> dict[str, Any]:
-    """Send one car command and record the reply, the car's status afterwards, and the stop."""
+async def send_command(api, util_mod, label: str, request: dict[str, Any], send, *, offer_stop: bool,
+                       control=None) -> dict[str, Any]:
+    """Send one car command and record the reply, the car's status afterwards, and the stop.
+
+    control, if given, is a plain command offered when the first one fails, to tell a
+    refused request body from a car that can't be started right now.
+    """
     record: dict[str, Any] = {"request": request}
 
     async def refreshed_status() -> dict[str, Any]:
@@ -406,6 +444,17 @@ async def send_command(api, util_mod, label: str, request: dict[str, Any], send,
     except Exception as err:  # noqa: BLE001  (the error text is the finding)
         record["error"] = f"{type(err).__name__}: {err}"
         print(f"  FAIL  {label}: {type(err).__name__}: {err}")
+        if control and confirm(
+            "Send the plain start (no climate block) as a control? If it works, Honda refused the "
+            "climate block; if it fails too, the car can't be remote-started right now.", "START"
+        ):
+            try:
+                result = await control()
+                record["control_result"] = {"request_id": result.request_id, "response": result.response}
+                print("  ok    plain start (control)")
+            except Exception as err2:  # noqa: BLE001
+                record["control_error"] = f"{type(err2).__name__}: {err2}"
+                print(f"  FAIL  plain start (control): {type(err2).__name__}: {err2}")
     try:
         record["status_after"] = await refreshed_status()
         print(f"  status after: {json.dumps(record['status_after'].get('remote_engine_status'))}")
@@ -507,16 +556,18 @@ async def run(args: argparse.Namespace) -> int:
                     problem = temperature_problem(setting)
                 except SystemExit as err:  # keep going so the read-only dump is still written
                     setting, problem = None, str(err)
-                request = {"extend": False, "vehicleControl": {"acSetting": setting}}
-                print("\nRemote start with this climate block (plus VIN and PIN):")
+                request = start_request(setting, args.start_extra)
+                plain = request == start_request(None, None)
+                print("\nRemote start with this request (plus VIN and PIN):")
                 print("  " + json.dumps(request))
                 if problem:
                     print(f"  Not sending: {problem}. Pass a temperature instead, e.g. --start-climate 72.")
                     results["start_climate"] = {"request": request, "not_sent": problem}
                 elif confirm("This STARTS THE CAR. Only continue if it is outdoors and you can see it.", "START"):
                     results["start_climate"] = await send_command(
-                        api, util_mod, "remote start with climate", request,
-                        lambda: api.async_start_engine(ac_setting=setting), offer_stop=True,
+                        api, util_mod, "plain remote start" if plain else "remote start with climate", request,
+                        lambda: send_start(api, request), offer_stop=True,
+                        control=None if plain else lambda: send_start(api, start_request(None, None)),
                     )
                 else:
                     print("  Skipped.")
@@ -588,6 +639,16 @@ async def run(args: argparse.Namespace) -> int:
     return 0 if results else 1
 
 
+def json_object(text: str) -> dict[str, Any]:
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as err:
+        raise argparse.ArgumentTypeError(f"not valid JSON: {err}") from None
+    if not isinstance(value, dict):
+        raise argparse.ArgumentTypeError("must be a JSON object, e.g. '{\"isChanged\": true}'")
+    return value
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Dump HondaLink API responses (read-only by default).")
     parser.add_argument("--integration-dir", help="Folder containing the integration's api.py and const.py")
@@ -596,9 +657,11 @@ def main() -> None:
                         help="Ask the car to report fresh data first (same as the Refresh button; pings the car)")
     parser.add_argument("--probe", action="store_true",
                         help="Also try read-only endpoints found in the iOS app (no vehicle commands)")
-    parser.add_argument("--start-climate", metavar="saved|TEMP|none",
+    parser.add_argument("--start-climate", metavar="saved|TEMP|none|plain",
                         help="STARTS THE CAR with a climate block: the saved settings, a temperature in F, "
-                             "or none (defroster only). Asks before sending")
+                             "none (defroster only) or plain (no climate block). Asks before sending")
+    parser.add_argument("--start-extra", metavar="JSON", type=json_object,
+                        help="With --start-climate: a JSON object merged into the start request")
     parser.add_argument("--defrost-front", metavar="VALUE",
                         help="With --start-climate: front defroster value to send, e.g. on or off")
     parser.add_argument("--defrost-rear", metavar="VALUE",
@@ -609,10 +672,10 @@ def main() -> None:
     parser.add_argument("--raw", action="store_true", help="Also write unredacted copies to raw/")
     parser.add_argument("--out", help="Output folder (default: hondalink_dump_<timestamp>)")
     args = parser.parse_args()
-    if (args.defrost_front or args.defrost_rear) and not args.start_climate:
-        parser.error("--defrost-front/--defrost-rear only apply with --start-climate")
-    if args.start_climate and not re.fullmatch(r"saved|none|\d{1,3}", args.start_climate.strip().lower()):
-        parser.error('--start-climate takes "saved", "none" or a whole temperature in F, e.g. 72')
+    if (args.defrost_front or args.defrost_rear or args.start_extra) and not args.start_climate:
+        parser.error("--defrost-front/--defrost-rear/--start-extra only apply with --start-climate")
+    if args.start_climate and not re.fullmatch(r"saved|none|plain|\d{1,3}", args.start_climate.strip().lower()):
+        parser.error('--start-climate takes "saved", "none", "plain" or a whole temperature in F, e.g. 72')
     sys.exit(asyncio.run(run(args)))
 
 

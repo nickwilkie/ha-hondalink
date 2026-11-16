@@ -174,7 +174,8 @@ def test_set_climate_temperature() -> None:
 
 
 def _args(**overrides: Any) -> argparse.Namespace:
-    values = {"start_climate": None, "defrost_front": None, "defrost_rear": None, "climate_now": None}
+    values = {"start_climate": None, "defrost_front": None, "defrost_rear": None, "climate_now": None,
+              "start_extra": None}
     return argparse.Namespace(**{**values, **overrides})
 
 
@@ -227,8 +228,21 @@ class _FakeToolAPI:
     async def async_get_dashboard_latest(self, vin):
         return {"responseBody": {"temperature": {"cabin": {"value": "21", "unit": "c"}}}}
 
-    async def async_start_engine(self, *, extend=False, ac_setting=None):
-        self.commands.append(("start", ac_setting))
+    refuse_climate = False
+
+    def _vin(self):
+        return self.vin
+
+    def _pin(self):
+        return self.pin
+
+    async def _async_cig_command(self, engine, command, body):
+        assert (engine, command) == ("eng", "srt")
+        assert body["device"] == self.vin and body["pin"] == self.pin
+        request = {key: value for key, value in body.items() if key not in ("device", "pin")}
+        self.commands.append(("start", request))
+        if self.refuse_climate and "vehicleControl" in request:
+            raise api_module.HondaLinkCommandError("HondaLink request failed: HTTP 500")
         return api_module.HondaLinkCommandResult("req-1", {"status": "SUCCESS", "pin": self.pin})
 
     async def async_stop_engine(self):
@@ -242,6 +256,7 @@ class _FakeToolAPI:
 
 def _run_tool(monkeypatch, tmp_path, answers: list[str], **overrides: Any) -> Path:
     _FakeToolAPI.commands = []
+    _FakeToolAPI.refuse_climate = overrides.pop("refuse_climate", False)
     monkeypatch.setattr(dump, "load_api", lambda directory: types.SimpleNamespace(HondaLinkAPI=_FakeToolAPI))
     monkeypatch.setattr(dump, "load_util", lambda: util)
     monkeypatch.setattr(dump, "find_integration_dir", lambda arg: ROOT)
@@ -274,7 +289,9 @@ def test_tool_start_climate_needs_typed_confirmation(monkeypatch, tmp_path) -> N
 def test_tool_start_climate_sends_and_stops(monkeypatch, tmp_path) -> None:
     out = _run_tool(monkeypatch, tmp_path, ["START", "engine on, front defrost lit", "STOP"], start_climate="saved")
     assert _FakeToolAPI.commands == [
-        ("start", {"acTempVal": "72", "acTempUnit": "F", "acDefFSetting": "on"}),
+        ("start", {"extend": False, "vehicleControl": {"acSetting": {
+            "acTempVal": "72", "acTempUnit": "F", "acDefFSetting": "on",
+        }}}),
         ("refresh", None),
         ("stop", None),
     ]
@@ -296,3 +313,32 @@ def test_tool_climate_now(monkeypatch, tmp_path) -> None:
     out = _run_tool(monkeypatch, tmp_path, ["SEND"], climate_now=72)
     assert _FakeToolAPI.commands == [("climate", (72, "F")), ("refresh", None)]
     assert (out / "climate_now.json").exists()
+
+
+def test_tool_plain_start_and_extra_fields(monkeypatch, tmp_path) -> None:
+    _run_tool(monkeypatch, tmp_path, ["START", "", "no"], start_climate="plain")
+    assert _FakeToolAPI.commands[0] == ("start", {"extend": False})
+    extra = {"command": "Start", "isChanged": True, "vehicleControl": {"acSetting": {"acDefFSetting": "on"}}}
+    _run_tool(monkeypatch, tmp_path, ["START", "", "no"], start_climate="72", start_extra=extra)
+    assert _FakeToolAPI.commands[0] == ("start", {
+        "extend": False, "command": "Start", "isChanged": True,
+        "vehicleControl": {"acSetting": {"acTempVal": "72", "acTempUnit": "F", "acDefFSetting": "on"}},
+    })
+
+
+def test_tool_offers_plain_start_as_control_after_a_refusal(monkeypatch, tmp_path) -> None:
+    out = _run_tool(monkeypatch, tmp_path, ["START", "START", "engine on", "STOP"], start_climate="72",
+                    refuse_climate=True)
+    assert [command for command, _ in _FakeToolAPI.commands] == ["start", "start", "refresh", "stop"]
+    assert _FakeToolAPI.commands[1] == ("start", {"extend": False})
+    record = json.loads((out / "start_climate.json").read_text())
+    assert "HTTP 500" in record["error"]
+    assert record["control_result"]["request_id"] == "req-1"
+
+
+def test_tool_shows_inside_the_profile_devices_list() -> None:
+    profile = {"devices": [{"deviceId": "ABC", "settings": {"temperatureValue": "22"}, "firstName": "N"}], "device": "X"}
+    assert dump.redact(profile, set()) == {
+        "devices": [{"deviceId": "**REDACTED**", "settings": {"temperatureValue": "22"}, "firstName": "**REDACTED**"}],
+        "device": "**REDACTED**",
+    }

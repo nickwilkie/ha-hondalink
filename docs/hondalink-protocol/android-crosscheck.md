@@ -358,3 +358,35 @@ Two separate things, now stated precisely:
 Whether the target-temperature screen's Update button also writes CPC is not
 pinned in smali. It does not matter for HA: an HA start that carries its own
 `vehicleControl.acSetting` needs neither call.
+
+## L. Live results, 2025 CR-V Hybrid (first run of the dump tool's climate probes)
+
+What Honda's servers actually said, as opposed to what the APK implies.
+
+- **Start with a climate block was refused.** `POST /REST/NGT/CIG/eng/async/srt` with
+  `{device, pin, extend: false, vehicleControl: {acSetting: {acTempVal: "72",
+  acTempUnit: "F"}}}` returned HTTP 500, `status: failure`, `errorCode: 0000-00-1001`,
+  "We are unable to complete your request. Please try again later." It did carry a
+  `cigServiceRequestId`. The car did not start (`resStatus` stayed `OFF`).
+  **Not yet known** whether the body was the cause: no plain start was sent in the same
+  conditions (doors unlocked, fuel 15 %, master warning lamp on). The tool now offers
+  that control.
+- **`myProfile` holds no climate keys for this account.** The whole reply sits under one
+  top-level key, `devices`; none of `temperatureValue`, `acDefrosterFront`, … appear
+  anywhere in it. Either nothing has been saved from the app yet, or §J.3's read path is
+  not where this account's settings live.
+- **The engine-stop result reveals the result vocabulary.** A stop sent with the engine
+  off succeeded and returned:
+
+  ```json
+  {"ignition": "ignitionOff", "resultCode": "0",
+   "vehicleControl": {"cabinTemperature": {"value": 224, "unit": "c"},
+                      "vehicleStartStatus": "stop",
+                      "acStatus": {"acTempVal": "00", "acDefSetting": "unknown"}}}
+  ```
+
+  So on this car the result side uses `acStatus.acTempVal` as a two-character string
+  (`"00"` with the engine off) and `acDefSetting`, not `acDefFSetting`/`acDefRSetting`.
+  That is the vocabulary §I.1 called "legacy CIG" (`acTempVal` level codes `"03"`/`"04"`/
+  `"05"`, defroster under `acDefSetting`), which makes the legacy request shape a
+  candidate for this car too. `cabinTemperature` 224 is a "no reading" value.
