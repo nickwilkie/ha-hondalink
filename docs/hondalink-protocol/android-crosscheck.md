@@ -144,3 +144,75 @@ names (`doorStatus`, `windowStatus`, …). Both facts stand; the earlier
 - Obfuscation: business logic in single-letter packages (`xu/b`, `tm/j`,
   `wo/a`, `ak/q`, `mb0/e`); `tm/j` = dashboard drawer fragment holding the
   67/72/77 handlers.
+
+## I. Review round 2 — open items resolved from the smali
+
+### I.1 The defroster, pinned
+
+The *ClimateAsync/1.0/temperature* body never carries a defroster value: at
+every 2G-X call site (`xu/b.u()` via `wo/b`, `tm/j`) `acDefSetting` is passed
+as `""`; only the scheduled variant uses `autoOn`/`autoOff`. The defroster is
+expressed elsewhere, in two places depending on generation:
+
+1. **2G-X (the 2025 CR-V Hybrid):** the defroster choice is persisted in the
+   saved climate settings (`ClimateSettingCommandDataInfo.acDefrosterFront /
+   acDefrosterRear`, `Y`/`N`) and mirrored into the **engine-start** body at
+   command build time: `ak/q.k()` copies `getAcDefrosterFront()` into
+   `acSetting.acDefFSetting` (rear the same way, `l()`), behind a per-VIN
+   feature check (`jk/g.t(vin, 2)`). So on your car: set the defroster once in
+   settings; it rides every remote start in `acSetting.acDefFSetting/RSetting`.
+2. **Legacy CIG (pre-2GX):** the UI presets are *named levels*, not degrees.
+   `ak/p.k()` maps the chosen preset to `acSetting.acTempVal`:
+   `normal→"04"`, `cool→"05"`, `warm→"03"`, `defrost→""`, and when the
+   preset is `defrost` it additionally sends
+   `vehicleControl.acTemporarySetting.acDefSetting = "manualOn"` with
+   `command = "defrost"`. This is exactly the "three tiers + defroster"
+   preset stack seen on iOS — it is the legacy vocabulary, distinct from
+   67/72/77 target-degrees.
+
+### I.2 iOS vs Android field names — reconciled
+
+Two different layers, no contradiction:
+
+- **Wire names (authoritative): Android Gson fields** — `acTempVal`,
+  `acTempUnit`, `acDefSetting`, `acDurationSetting`. Gson serializes field
+  names verbatim, so these *are* the JSON keys.
+- **iOS names** (`acTempValue`, `acDefSet`, `Lo`/`Hi`) came from Swift
+  *reflection* metadata (`__swift5_fieldmd`) — those are Swift property names
+  of iOS UI/storage models (the analogue of Android's Realm
+  `ClimateSettingInfoModel`), not proven wire keys. `Lo`/`Hi` in both apps are
+  slider *labels* (bounds 57–87), never sent.
+
+When they disagree, trust Android. deep-dive §10.1's table should be read as
+"iOS internal model", §11.1 as "wire format".
+
+### I.3 Read-back claim — downgraded
+
+The live 2025 CR-V Hybrid fixtures show `evStatus.vehicleInfo.acStatus =
+"unknown"` and empty `intTemp` (even engine-running). `EvStatus2Gx`
+*contains* the climate-setting fields, but this car's dashboard replies do not
+currently populate them. Until a capture shows otherwise: an HA climate entity
+can only remember what it last sent; it cannot read the car's stored setting
+from the dashboard.
+
+### I.4 `/ha/exchangeToken` — guess retracted
+
+Context found: the token feeds `VmSxmCustomerIdentity`
+(`exchangeTokenExpiresAtInMilliSec`) — it is a **SiriusXM/Castlabs media
+identity exchange**, nothing to do with Home Assistant.
+
+### I.5 Host for `/REST/CIG/...`
+
+The Android Retrofit interfaces are built on `https://wsc.hondaweb.com`
+(the same constant the integration already uses), and the absolute URL
+`https://wsc.hondaweb.com/REST/NGT/getClimateStatus/1.0/{vin}` appears in
+smali. Statically, `/REST/CIG/ClimateAsync/1.0/temperature` is the same host,
+different prefix. Still untested live — one probe needed.
+
+### I.6 Implemented: terminal failure statuses
+
+`api.py` now stops command polling immediately on `MAXIMUM_START_REQUESTS_EXCEEDED`,
+`TOO_MANY_REQUESTS`, `SERVICE_NOT_AVAILABLE`, `SERVICE_NOT_EXCECUTED` (sic),
+`SERVICE_MISSING_PERMISSION`, `SERVICE_DISABLED`,
+`SERVICE_VERSION_UPDATE_REQUIRED` (tests/test_api_poll.py; PR #7).
+`SERVICE_UPDATING` deliberately remains in-flight.
