@@ -69,6 +69,23 @@ def _lower_status(value: Any) -> str:
     return str(value or "").strip().lower()
 
 
+# Terminal failure tokens from the Android polling vocabulary
+# (docs/hondalink-protocol/android-crosscheck.md §E). When one of these is seen
+# the command is already dead — end polling now instead of waiting out the
+# full timeout. SERVICE_UPDATING is deliberately absent (ambiguous/transient).
+TERMINAL_FAILURE_STATUSES = frozenset(
+    {
+        "service_not_available",
+        "service_not_excecuted",  # sic — Honda's spelling
+        "service_missing_permission",
+        "service_disabled",
+        "service_version_update_required",
+        "maximum_start_requests_exceeded",
+        "too_many_requests",
+    }
+)
+
+
 def _is_dynamic_backend_error(err: Exception) -> bool:
     text = str(err)
     return _DYNAMIC_BACKEND_ERROR_CODE in text or "Dynamic backend host not specified" in text
@@ -415,8 +432,8 @@ class HondaLinkAPI:
 
             if status in ("success", "completed", "complete", "ok"):
                 return data
-            if status in ("failure", "failed", "error"):
-                message = response_body.get("errorMessage") or str(data)
+            if status in ("failure", "failed", "error") or status in TERMINAL_FAILURE_STATUSES:
+                message = response_body.get("errorMessage") or status or str(data)
                 raise HondaLinkCommandError(message)
 
             await asyncio.sleep(poll_interval)
