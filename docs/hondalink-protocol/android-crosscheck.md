@@ -216,3 +216,85 @@ different prefix. Still untested live — one probe needed.
 `SERVICE_MISSING_PERMISSION`, `SERVICE_DISABLED`,
 `SERVICE_VERSION_UPDATE_REQUIRED` (tests/test_api_poll.py; PR #7).
 `SERVICE_UPDATING` deliberately remains in-flight.
+
+## J. Engine-start body, complete — the last open points
+
+All from `ak/q` (the 2G-X CIG command builder) and the Gson models it feeds,
+`smali_classes4/ak/q.smali` lines cited at verdict time.
+
+### J.1 Full request model (`CIGPostRequest`)
+
+`POST /REST/NGT/CIG/{eng}/async/{command}` with the CIG verb in the path
+(`srt` start, `sop` stop — also `alk/dulk/lgt/hrn/dbd`). Body:
+
+```json
+{
+  "command": "Start",            // human name; also "Settings". Verb code is the URL path param.
+  "commandStatus": null,
+  "device": "<VIN>",
+  "extend": false,               // Boolean: allow run-time extension
+  "filters": [],                 // String[]
+  "isChanged": false,            // Boolean
+  "pin": "<pin>",
+  "vehicleControl": {
+    "acSetting":          { ...cigmodel.AcSetting... },
+    "acTemporarySetting": { ...cigmodel.AcTemporarySetting... }
+  }
+}
+```
+
+### J.2 What the app actually puts in `acSetting` at start time (ak/q)
+
+| wire field | source (verified smali) | value |
+|---|---|---|
+| `acTempVal` | saved setting via `ak/d.i(int,String)` | **temperature DOES ride the start** |
+| `acTempUnit` | `equalsIgnoreCase` on saved unit | `"F"` or `"C"` |
+| `acDefFSetting` | `getAcDefrosterFront().toLowerCase(Locale)` | saved value lowercased; **not** `Y`/`N` — see J.3 |
+| `acDefRSetting` | same, rear | as above |
+| `seatHeaterDrSetting` | `getAcDriverHeated()` | saved value |
+| `seatHeaterAsSetting` | `getAcPassengerHeater()` | saved value |
+| `strHeaterSetting` | `getAcHeaterSteering().toLowerCase()` | saved value lowercased |
+
+Unset fields are set to `null` (`const/4 0x0`) and Gson omits them. The
+def/seat block is behind per-VIN feature checks (`jk/g.t(vin, 2)` etc.).
+
+**Correction to §I:** the saved defroster strings are **not** `Y`/`N`. The app
+initializes settings with the literal `"Off"` (`tm/j`), so the engine-start
+copy yields lowercase wire values — `"off"`, and `"on"` when enabled
+(the enabled literal still needs one live CPC read to confirm).
+
+### J.3 Where saved climate settings live: server-side CPC
+
+The settings the start builder reads come from the **CPC (customer/profile)
+API**, not phone-only storage:
+
+- Read: `GET /REST/NGT/myProfile/1.0/{VIN}` → profile attribute map. The
+  mapper (`ek/d`) reads literal keys: `temperatureValue`, `acDefrosterFront`,
+  `acDefrosterRear`, `acDriverHeated`, `acPassengerHeater`, `acHeaterSteering`.
+- Write: `POST /REST/NGT/usersProfile/1.0/` (log string "CPC Put Api Called").
+- The app mirrors these into local Realm (`ClimateSettingInfoModel` via
+  `gk/d`) purely as a cache; the authoritative copy is the server profile.
+- iOS agrees: `api-map.txt` has `myProfile` GET and `userProfiles` POST/modify.
+
+So HA can read the user's saved climate settings itself and build the same
+`acSetting` block — a remote start from HA **can** defrost, pre-heat seats etc.
+without the phone in the loop, by copying what the app does: GET myProfile →
+lowercase the defroster/heater values → put them in `vehicleControl.acSetting`
+on the `srt` call.
+
+### J.4 Consequence for the HA integration
+
+- Omitting `vehicleControl` from an HA start is *not* equivalent to the app's
+  start: the app always sends the saved `acSetting` (feature-gated). HA should
+  add an optional `acSetting` block (temperature + defroster + heaters), default
+  = current behavior (unchanged) or optionally mirror CPC.
+- `ClimateAsync/temperature` only stores the *setting* (and starts the
+  immediate climate command); it does not alter what a *later* start carries —
+  that comes from CPC at command-build time.
+
+### J.5 Still needs one live probe each
+
+- Exact CPC value strings when defroster enabled (`"On"`? `"on"`?).
+- Whether `usersProfile` PUT is per-key or whole-profile replace.
+- One real `srt` body from the app (Charles/Fiddler) to confirm optional-field
+  omission matches Gson behavior.
