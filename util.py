@@ -403,6 +403,137 @@ def cabin_temperature_unit(body: dict[str, Any]) -> str | None:
     return None
 
 
+# Remote-start climate. Field names and rules are from the HondaLink Android app
+# (docs/hondalink-protocol/android-crosscheck.md sections J and K); none of it has been
+# confirmed against the live service yet.
+#
+# The app keeps the owner's climate choices in the account profile
+# (GET /REST/NGT/myProfile/1.0/{VIN}) under these keys, and copies them into the
+# engine-start body as vehicleControl.acSetting.
+SAVED_CLIMATE_KEYS = (
+    "temperatureValue",
+    "acDefrosterFront",
+    "acDefrosterRear",
+    "acDriverHeated",
+    "acPassengerHeater",
+    "acHeaterSteering",
+)
+_SAVED_CLIMATE_UNIT_KEYS = ("unit", "tempUnit", "temperatureUnit")
+
+
+def saved_climate_settings(profile: Any) -> dict[str, Any]:
+    """Find the saved climate settings anywhere in a myProfile reply.
+
+    The reply's layout is not known yet, so this accepts the keys as plain dict keys
+    ({"temperatureValue": "22"}) or as name/value records
+    ({"name": "temperatureValue", "value": "22"}). The temperature unit is taken from the
+    dict that holds the climate keys, and returned as "unit".
+    """
+    found: dict[str, Any] = {}
+
+    def walk(node: Any) -> None:
+        if isinstance(node, list):
+            for item in node:
+                walk(item)
+            return
+        if not isinstance(node, dict):
+            return
+        direct = [key for key in SAVED_CLIMATE_KEYS if key in node and not isinstance(node[key], (dict, list))]
+        for key in direct:
+            found.setdefault(key, node[key])
+        if direct:
+            for unit_key in _SAVED_CLIMATE_UNIT_KEYS:
+                if isinstance(node.get(unit_key), str):
+                    found.setdefault("unit", node[unit_key])
+                    break
+        named = [value for value in node.values() if isinstance(value, str) and value in SAVED_CLIMATE_KEYS]
+        if len(named) == 1:
+            for key, value in node.items():
+                if "value" in str(key).lower() and not isinstance(value, (dict, list)) and value != named[0]:
+                    found.setdefault(named[0], value)
+                    break
+        for value in node.values():
+            walk(value)
+
+    walk(profile)
+    return found
+
+
+def _java_round(value: float) -> int:
+    # Java's Math.round: halves go up. Python's round() sends them to the even number.
+    return int((value + 0.5) // 1)
+
+
+def app_ac_temp_val(saved_value: Any, unit: Any, country: str = "US") -> str | None:
+    """The acTempVal the app would send for a saved temperature (its ak/d.i helper).
+
+    For a US car the app converts the saved value from Celsius to Fahrenheit unless the
+    saved unit is Celsius; for a Canadian car it converts Fahrenheit to Celsius when the
+    saved unit is Fahrenheit. Other values pass through.
+    """
+    number = to_float(saved_value)
+    if number is None:
+        return None
+    unit_text = str(unit or "").lower()
+    if str(country or "").upper() == "CA":
+        if "f" in unit_text:
+            number = (number - 32) * 5 / 9
+    elif "c" not in unit_text:
+        number = number * 9 / 5 + 32
+    return str(_java_round(number))
+
+
+def build_ac_setting(
+    *,
+    temperature: Any = None,
+    unit: str = "F",
+    defrost_front: Any = None,
+    defrost_rear: Any = None,
+    seat_heater_driver: Any = None,
+    seat_heater_passenger: Any = None,
+    steering_heater: Any = None,
+) -> dict[str, str] | None:
+    """Build vehicleControl.acSetting for the engine-start body, or None if nothing is set.
+
+    Every value is a string and unset fields are left out, as the app does. temperature is
+    in whole degrees of unit; the other values are sent as given (lower case for the
+    defrosters and steering heater, like the app).
+    """
+    setting: dict[str, str] = {}
+    degrees = to_float(temperature)
+    if degrees is not None:
+        setting["acTempVal"] = str(_java_round(degrees))
+        setting["acTempUnit"] = "C" if str(unit or "").strip().upper().startswith("C") else "F"
+    for key, value, lower in (
+        ("acDefFSetting", defrost_front, True),
+        ("acDefRSetting", defrost_rear, True),
+        ("seatHeaterDrSetting", seat_heater_driver, False),
+        ("seatHeaterAsSetting", seat_heater_passenger, False),
+        ("strHeaterSetting", steering_heater, True),
+    ):
+        if value is None or str(value).strip() == "":
+            continue
+        setting[key] = str(value).strip().lower() if lower else str(value).strip()
+    return setting or None
+
+
+def ac_setting_from_saved(saved: dict[str, Any], country: str = "US") -> dict[str, str] | None:
+    """The acSetting block the app would send for these saved settings."""
+    setting = build_ac_setting(
+        defrost_front=saved.get("acDefrosterFront"),
+        defrost_rear=saved.get("acDefrosterRear"),
+        seat_heater_driver=saved.get("acDriverHeated"),
+        seat_heater_passenger=saved.get("acPassengerHeater"),
+        steering_heater=saved.get("acHeaterSteering"),
+    ) or {}
+    unit = saved.get("unit")
+    temp_val = app_ac_temp_val(saved.get("temperatureValue"), unit, country)
+    if temp_val is not None:
+        temp = {"acTempVal": temp_val, "acTempUnit": "C" if str(unit or "").strip().lower() == "c" else "F"}
+        setting = {**temp, **setting}
+    return setting or None
+
+
 def group_messages(body: dict[str, Any], base: str) -> list[Any]:
     """Collect messages from a `{base}.data[*].messages[*]` block.
 

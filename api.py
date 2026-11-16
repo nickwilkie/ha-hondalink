@@ -314,11 +314,45 @@ class HondaLinkAPI:
         result = await self._poll_cig_result("dbd", request_id, timeout=60, poll_interval=3)
         return HondaLinkCommandResult(request_id, result)
 
-    async def async_start_engine(self, *, extend: bool = False) -> HondaLinkCommandResult:
-        return await self._async_cig_command(
-            "eng",
-            "srt",
-            {"device": self._vin(), "pin": self._pin(), "extend": bool(extend)},
+    async def async_start_engine(
+        self,
+        *,
+        extend: bool = False,
+        ac_setting: dict[str, str] | None = None,
+    ) -> HondaLinkCommandResult:
+        """Remote start. ac_setting is the optional climate block the app sends with it.
+
+        Without ac_setting the body is the one that has always worked for this car. The
+        block's shape (util.build_ac_setting) comes from the Android app and is not yet
+        confirmed against the live service.
+        """
+        body: dict[str, Any] = {"device": self._vin(), "pin": self._pin(), "extend": bool(extend)}
+        if ac_setting:
+            body["vehicleControl"] = {"acSetting": dict(ac_setting)}
+        return await self._async_cig_command("eng", "srt", body)
+
+    async def async_set_climate_temperature(self, temperature: int, unit: str = "F") -> HondaLinkCommandResult:
+        """The app's Climate Settings "Update": an immediate climate command.
+
+        POST /REST/CIG/ClimateAsync/1.0/temperature, from the Android app
+        (docs/hondalink-protocol/deep-dive.md section 11). Not yet confirmed live.
+        """
+        body = {
+            "device": self._vin(),
+            "pin": self._pin(),
+            "vehicleControl": {
+                "acSetting": {
+                    "acTempVal": str(int(temperature)),
+                    "acTempUnit": "C" if str(unit).strip().upper().startswith("C") else "F",
+                    "acDurationSetting": "",
+                    "acDefSetting": "",
+                }
+            },
+        }
+        return await self._async_command(
+            "/REST/CIG/ClimateAsync/1.0/temperature",
+            "/REST/NGT/getClimateResult/1.0/temperature/{request_id}",
+            body,
         )
 
     async def async_stop_engine(self) -> HondaLinkCommandResult:
@@ -389,10 +423,28 @@ class HondaLinkAPI:
         timeout: int = 75,
         poll_interval: int = 3,
     ) -> HondaLinkCommandResult:
+        return await self._async_command(
+            f"/REST/NGT/CIG/{engine}/async/{command}",
+            f"/REST/NGT/CIG/{engine}/results/{{request_id}}",
+            body,
+            timeout=timeout,
+            poll_interval=poll_interval,
+        )
+
+    async def _async_command(
+        self,
+        post_path: str,
+        result_path: str,
+        body: dict[str, Any],
+        *,
+        timeout: int = 75,
+        poll_interval: int = 3,
+    ) -> HondaLinkCommandResult:
+        """Send a command, then poll result_path (with {request_id} filled in) until it ends."""
         try:
             data = await self._request_api(
                 "POST",
-                f"/REST/NGT/CIG/{engine}/async/{command}",
+                post_path,
                 json_body=body,
             )
         except HondaLinkError as err:
@@ -408,7 +460,9 @@ class HondaLinkAPI:
         if not request_id:
             return HondaLinkCommandResult(None, data)
 
-        result = await self._poll_cig_result(engine, request_id, timeout, poll_interval)
+        result = await self._poll_result(
+            result_path.format(request_id=request_id), timeout, poll_interval
+        )
         return HondaLinkCommandResult(request_id, result)
 
     async def _poll_cig_result(
@@ -418,14 +472,16 @@ class HondaLinkAPI:
         timeout: int,
         poll_interval: int,
     ) -> dict[str, Any]:
+        return await self._poll_result(
+            f"/REST/NGT/CIG/{engine}/results/{request_id}", timeout, poll_interval
+        )
+
+    async def _poll_result(self, path: str, timeout: int, poll_interval: int) -> dict[str, Any]:
         deadline = time.monotonic() + timeout
         last_data: dict[str, Any] = {}
 
         while time.monotonic() < deadline:
-            data = await self._request_api(
-                "GET",
-                f"/REST/NGT/CIG/{engine}/results/{request_id}",
-            )
+            data = await self._request_api("GET", path)
             last_data = data
             response_body = data.get("responseBody") or {}
             status = _lower_status(data.get("status") or response_body.get("status") or response_body.get("commandStatus"))
