@@ -1,0 +1,173 @@
+POST   /REST/AAA/HondaApplinkService/2.0                            body:
+POST   /REST/CIG/ChargeAsyncLevel/1.0                               body:
+POST   /REST/CIG/ChargeSchedule/1.0                                 body:
+POST   /REST/CIG/ChargeStartStop/1.0/{command}                      path:,body:
+POST   /REST/CIG/ClimateAsync/1.0/{command}                         path:,body:
+POST   /REST/CIG/ClimateSetting/1.0                                 body:
+POST   /REST/CIG/services/1.0/token                                 body:
+GET    /REST/GDO/devices/1.0                                        
+POST   /REST/GDO/enrollment/1.0                                     body:
+POST   /REST/GDO/remoteCommand_async/1.0                            body:
+POST   /REST/NGT/ABO/CustomerOwnershipVerification/1.0/             body:
+POST   /REST/NGT/ABO/CustomerProfileMgmt/authenticateCustomer/1.0/  body:
+POST   /REST/NGT/ABO/CustomerProfileMgmt/validateTelematicsCustomer/1.0/ body:
+GET    /REST/NGT/ABO/GetVolteStatus                                 query:
+GET    /REST/NGT/ActivityLog/1.0/{device}                           path:,query:
+POST   /REST/NGT/AuthChallenge/1.0                                  
+POST   /REST/NGT/CIG/dbd/async                                      body:
+POST   /REST/NGT/CIG/dbd/latest/{device}                            path:,body:
+POST   /REST/NGT/CIG/gefe/async                                     body:
+GET    /REST/NGT/CIG/gefe/results/{device}                          path:
+POST   /REST/NGT/CIG/pi/async                                       body:
+POST   /REST/NGT/CIG/spal/async                                     body:
+GET    /REST/NGT/CIG/spal/results/{device}                          path:
+POST   /REST/NGT/CIG/wph/async                                      body:
+POST   /REST/NGT/CIG/{eng}/async/{command}                          body:,path:,path:
+GET    /REST/NGT/CIG/{eng}/results/{cigServiceRequestId}            path:,path:
+POST   /REST/NGT/CIGContacts/1.0                                    body:
+GET    /REST/NGT/CIGContactsResults/1.0/{device}                    path:
+POST   /REST/NGT/CIGNotification/1.0/{sxmId}/{device}               path:,path:,body:
+POST   /REST/NGT/CPM/Authcode/1.0/{vin}                             body:,path:
+GET    /REST/NGT/CPM/UBIStateAvailability/1.0/{PROGRAM_NAME}        path:
+POST   /REST/NGT/CPOAccountLink/1.0                                 body:
+POST   /REST/NGT/CPOChargeControl/1.0/{event}                       body:,path:
+POST   /REST/NGT/CPOEnrollment/1.0/evgo                             body:
+POST   /REST/NGT/CPOSessionHistory/1.0                              body:
+POST   /REST/NGT/CPOUnenrollment/1.0/evgo                           body:
+GET    /REST/NGT/CSAccountStatus/1.0                                query:
+GET    /REST/NGT/CVP/DrivingScores/1.0/{VIN}                        path:,query:,query:
+GET    /REST/NGT/CVP/TripScores/1.0/{VIN}                           path:,query:,query:
+POST   /REST/NGT/ChargerPowerLevel/1.0                              body:
+GET    /REST/NGT/CustomerPreference/1.0                             
+PUT    /REST/NGT/CustomerPreference/1.0                             body:
+POST   /REST/NGT/CustomerProgramEnrollmentV2/1.0                    body:
+PUT    /REST/NGT/CustomerProgramEnrollmentV2/1.0                    body:
+GET    /REST/NGT/DeviceAccessStatus/1.0                             
+POST   /REST/NGT/Enrollment/EnrollmentInformation/1.0               
+GET    /REST/NGT/Enrollment/ProgressStatus/2.0/{device}             path:
+POST   /REST/NGT/Enrollment/ResendNotification/2.0                  
+POST   /REST/NGT/Enrollment/VehicleEntitlement/2.0                  body:
+POST   /REST/NGT/EnrollmentCustomerEntitlement/1.0                  body:
+POST   /REST/NGT/EnrollmentPIN/1.0/{VIN}                            body:,path:
+GET    /REST/NGT/EnrollmentTrialEligibility/1.0/{device}            path:
+POST   /REST/NGT/EnrollmentValidateNotification/1.0                 body:
+POST   /REST/NGT/FAQCategories/1.0/                                 body:
+POST   /REST/NGT/FAQMessagesByCategory/1.0/                         body:
+POST   /REST/NGT/FOTAcampaignsWhatsNew/1.0                          body:
+GET    /REST/NGT/FOTAvehiclesGetVincampaigns/1.0/{vin}/campaigns    path:
+GET    /REST/NGT/FeatureList/1.0/{VIN}                              path:
+GET    /REST/NGT/GetCustomerPreference/1.0                          
+GET    /REST/NGT/GetDealerInfo/1.0/{VIN}                            path:
+GET    /REST/NGT/GetProfileAPI/1.0                                  
+POST   /REST/NGT/GrantProfileAccess/1.0                             
+POST   /REST/NGT/LocationSearch/1.0                                 body:
+POST   /REST/NGT/ManageCharge/1.0                                   body:
+POST   /REST/NGT/MobileApplicationUpdateInfo/1.0/                   body:
+GET    /REST/NGT/MyVehicle/1.0                                      
+POST   /REST/NGT/MyVehicle/1.0                                      body:
+GET    /REST/NGT/MyVehicle/1.0/{VIN}                                path:
+POST   /REST/NGT/NE/pushToken/2.0/                                  query:,query:,query:,query:,query:,query:
+PUT    /REST/NGT/NE/pushToken/2.0/                                  query:,query:,query:,query:,query:
+GET    /REST/NGT/NS/preference/{device_id}                          path:
+PUT    /REST/NGT/NS/preference/{preference_id}                      path:,body:
+POST   /REST/NGT/NgtEnrlEventLog/1.0/                               body:
+POST   /REST/NGT/OSSSearchAppointment/1.0                           body:
+PUT    /REST/NGT/PinManagement/UpdatePinService/1.0/                body:
+POST   /REST/NGT/ProgramEligibility/1.0/                            body:
+POST   /REST/NGT/Promotiondetails/1.0                               body:
+POST   /REST/NGT/Promotionstatus/1.0                                body:
+POST   /REST/NGT/RAH/rewards/donate                                 body:
+POST   /REST/NGT/RAH/rewards/redeem                                 body:
+GET    /REST/NGT/RAH/rewards/{deviceId}                             path:
+GET    /REST/NGT/RAH/session/details/{sc_session_id}                path:
+GET    /REST/NGT/RAH/session/history/{device_id}                    path:
+POST   /REST/NGT/SCPM/Enroll                                        body:
+PUT    /REST/NGT/SCPM/Enroll/{location_id}                          path:,body:
+POST   /REST/NGT/SCPM/Location                                      body:
+PUT    /REST/NGT/SCPM/Location/{location_id}                        path:,body:
+GET    /REST/NGT/SCPM/Locations/{deviceId}                          path:,query:
+POST   /REST/NGT/SCPM/UnEnroll                                      body:
+POST   /REST/NGT/SSM/DRI/session/override/{event}                   path:,body:
+GET    /REST/NGT/SVLGetStatus/1.0/{device}                          path:
+POST   /REST/NGT/SVLReportStolenVehicle/1.0                         body:
+POST   /REST/NGT/SearchOutage/1.0/                                  body:
+POST   /REST/NGT/Settings/SyncSettings/1.0/user/createProfile       body:
+GET    /REST/NGT/Settings/SyncSettings/1.0/user/profile             query:,query:
+PUT    /REST/NGT/Settings/SyncSettings/1.0/user/syncProfile         body:
+POST   /REST/NGT/SiteLookup/1.0                                     body:
+POST   /REST/NGT/TAC/tcAction/1.0/                                  body:
+GET    /REST/NGT/TAC/tcContent/1.0/{NAME}                           path:
+GET    /REST/NGT/TAC/tcStatus/1.0/{NAME}                            path:
+GET    /REST/NGT/TAC/tcStatus/1.0/{NAME}/{VIN}                      path:,path:
+GET    /REST/NGT/TAC/tcStatus/1.0/{NAME}/{VIN}/{locationId}         path:,path:,path:
+GET    /REST/NGT/TAC/tcStatus/1.0/{NAME}/{device}                   path:,path:
+POST   /REST/NGT/TCAction/1.0/                                      body:
+GET    /REST/NGT/TCConsent/1.0/bev3                                 
+GET    /REST/NGT/TCConsent/1.0/{NAME}?programId=ONSTAR_GF           path:
+GET    /REST/NGT/TCStatus/1.0/{VIN}/                                path:,query:
+GET    /REST/NGT/TCStatus/1.0/{VIN}/?program=ONSTAR_GF              path:
+POST   /REST/NGT/TargetChargeLevel/1.0                              body:
+POST   /REST/NGT/TermsAndConditionsValidateUserAction/1.0/          body:
+PUT    /REST/NGT/UpdateCustomerPreference/1.0                       body:
+PUT    /REST/NGT/VTI/telematics/feature-setting                     body:
+PUT    /REST/NGT/VTP/telematics/ppp-setting/                        body:
+GET    /REST/NGT/VTP/telematics/profile/{VIN}                       path:
+GET    /REST/NGT/Vehicle/Rdr/{device}/{resource}                    path:,path:
+POST   /REST/NGT/VehicleAccessVerification/igOn/1.0/                body:
+GET    /REST/NGT/VehicleAccessVerification/igOn/1.0/{serviceRequestId} path:
+GET    /REST/NGT/VehicleMessage/Details/1.0/{VIN}                   path:
+POST   /REST/NGT/VehicleMessage/Status/1.0                          body:
+GET    /REST/NGT/VinLookUp/1.0/{VIN}                                path:
+POST   /REST/NGT/WifiHotspotAsync/1.0                               body:
+GET    /REST/NGT/getChargeResult/1.0/{command}/{cigServiceRequestId} path:,path:
+GET    /REST/NGT/getClimateResult/1.0/{command}/{cigServiceRequestId} path:,path:
+POST   /REST/NGT/getVINFromToken/1.0                                body:
+POST   /REST/NGT/inviteStatus/1.0/                                  body:
+POST   /REST/NGT/inviteUser/1.0/                                    body:
+GET    /REST/NGT/myProfile/1.0/{VIN}                                path:
+POST   /REST/NGT/preferencesettings/1.0                             body:
+PUT    /REST/NGT/preferencesettings/1.0                             body:
+GET    /REST/NGT/programEnrollment/1.0                              
+GET    /REST/NGT/programState/2.0/{VIN}                             path:
+POST   /REST/NGT/removeHomeLocation/1.0                             body:
+POST   /REST/NGT/setCommuteSchedule/1.0                             body:
+POST   /REST/NGT/setHomeLocation/1.0                                body:
+POST   /REST/NGT/userDetails/1.0                                    body:
+POST   /REST/NGT/usersProfile/1.0/                                  body:
+GET    /REST/NGT/usersProfile/1.0/{VIN}/{PROGRAM_NAME}              path:,path:
+POST   /REST/NGT/vehiclesFotaUpdate/1.0                             body:
+POST   /REST/NGT/{eng}/1.0                                          body:,path:
+GET    /REST/Plugshare/Region/1.0                                   
+POST   /REST/SPT/VehiclePartsHealth/1.0                             body:
+POST   /REST/SPT/VehiclePartsHealthFeedback/1.0                     body:
+POST   /REST/SSO/GetAccessToken/1.0                                 
+GET    /VinRecall/VinRecallServiceREST.svc/{VIN}                    path:,query:
+POST   /api/GW/VinService/AconTimerSettingUpdate                    
+POST   /api/GW/VinService/DeleteServerNotification                  
+POST   /api/GW/VinService/GetLatestVehicleData                      
+POST   /api/GW/VinService/GetServerNotification                     
+GET    /api/GW/VinService/MessageDeliverySettingRequest             query:
+POST   /api/GW/VinService/MessageDeliverySettingUpdate              
+POST   /api/GW/VinService/RegisterRemoteList                        
+POST   /api/GW/VinService/RegisterServerNotification                
+POST   /api/SSOAccountDelete                                        
+GET    /api/VinServiceAuth                                          
+POST   /api/getSSO                                                  
+POST   /hidas/rs/client/register                                    
+POST   /hidas/rs/token/generate                                     
+POST   /hidas/rs/token/generate/shortlive                           
+POST   /hidas/rs/token/reissue                                      
+POST   /hidas/rs/token/revoke                                       
+POST   /hidas/rs/user/password/change                               
+POST   /hidas/rs/user/update                                        
+GET    /maps/api/geocode/json                                       
+GET    /maps/api/place/details/json                                 
+GET    /maps/api/place/nearbysearch/json                            
+GET    /maps/api/place/textsearch/json                              
+GET    /poi/private                                                 query:,query:,query:,query:,query:,query:,query:,query:,query:,query:,query:,query:,query:,query:,query:
+POST   /recalls/GetRecalls.ashx                                     query:,body:
+POST   /webservices/chargepoint/services/5.0                        body:
+GET    https://wsc.hondaweb.com/REST/NGT/getClimateStatus/1.0/{vin} path:
+GET    nearby                                                       
+GET    {STATION_ID}                                                 path:
+GET    {VIN}                                                        path:
