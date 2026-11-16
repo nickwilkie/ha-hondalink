@@ -432,9 +432,12 @@ class HondaLinkAPI:
 
             if status in ("success", "completed", "complete", "ok"):
                 return data
-            if status in ("failure", "failed", "error") or status in TERMINAL_FAILURE_STATUSES:
-                message = response_body.get("errorMessage") or status or str(data)
-                raise HondaLinkCommandError(message)
+            if status in ("failure", "failed", "error"):
+                # keep the full reply for generic failures (better diagnostics)
+                raise HondaLinkCommandError(response_body.get("errorMessage") or str(data))
+            if status in TERMINAL_FAILURE_STATUSES:
+                raw = data.get("status") or response_body.get("status") or response_body.get("commandStatus")
+                raise HondaLinkCommandError(response_body.get("errorMessage") or str(raw))
 
             await asyncio.sleep(poll_interval)
 

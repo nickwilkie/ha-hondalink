@@ -100,3 +100,34 @@ def test_in_flight_statuses_keep_polling(monkeypatch):
     result = _run(api._poll_cig_result("eng", "req-1", timeout=75, poll_interval=3))
     assert result["status"] == "SUCCESS"
     assert api.calls == 4
+
+
+def test_generic_failure_keeps_full_reply_as_message(monkeypatch):
+    clock = {"t": 0.0}
+    monkeypatch.setattr(api_module.time, "monotonic", lambda: clock["t"])
+
+    async def fake_sleep(interval: float) -> None:
+        clock["t"] += interval
+
+    monkeypatch.setattr(api_module.asyncio, "sleep", fake_sleep)
+
+    reply = {"status": "failed", "responseBody": {"errorCode": "E42", "detail": "nope"}}
+    api = _StubAPI([reply])
+    with pytest.raises(HondaLinkCommandError) as exc:
+        _run(api._poll_cig_result("eng", "req-1", timeout=75, poll_interval=3))
+    assert "E42" in str(exc.value)  # full reply preserved when no errorMessage
+
+
+def test_terminal_failure_message_uses_raw_status(monkeypatch):
+    clock = {"t": 0.0}
+    monkeypatch.setattr(api_module.time, "monotonic", lambda: clock["t"])
+
+    async def fake_sleep(interval: float) -> None:
+        clock["t"] += interval
+
+    monkeypatch.setattr(api_module.asyncio, "sleep", fake_sleep)
+
+    api = _StubAPI([{"status": "TOO_MANY_REQUESTS"}])
+    with pytest.raises(HondaLinkCommandError) as exc:
+        _run(api._poll_cig_result("eng", "req-1", timeout=75, poll_interval=3))
+    assert "TOO_MANY_REQUESTS" in str(exc.value)
