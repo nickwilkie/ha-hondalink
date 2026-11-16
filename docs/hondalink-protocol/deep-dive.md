@@ -314,3 +314,68 @@ fully recovered statically.
 `FeatureFilterMapper.json` (FeatureID → filter group),
 `FeatureLocalisationMapper.json` (feature key → localized label key).
 
+
+## 11. Climate Settings "Update" — cross-checked against HondaLink Android 5.5.4 (APK)
+
+The in-app *Climate Settings* screen (target temperature 67/72/77 F or defroster,
+"Update" button) was ambiguous in the iOS binary. The Android APK resolves it
+completely; Retrofit annotations carry literal endpoints.
+
+### 11.1 The request
+
+    POST /REST/CIG/ClimateAsync/1.0/temperature
+
+Body (`com.honda.common.model.twogx.request.temperatureSettings`):
+
+```json
+{
+  "device": "<VIN>",
+  "pin": "<4-digit or empty>",
+  "vehicleControl": {
+    "acSetting": {
+      "acTempVal": "67" | "72" | "77" | "",
+      "acTempUnit": "F",
+      "acDurationSetting": "",
+      "acDefSetting": ""
+    }
+  }
+}
+```
+
+- All four `acSetting` fields are strings, passed through verbatim
+  (`xu/b.t()` in de-obfuscated smali). Empty string = "not specified".
+- `67`/`72`/`77` are hardcoded picker tiers in the dashboard drawer and are sent
+  as plain decimal degree-F strings. Slider bounds are `"57"`–`"87"`, displayed
+  as `Lo`/`Hi` (localized labels; not sent).
+- The scheduled-climate variants send `acDefSetting = "autoOn" | "autoOff"` and
+  numeric `acDurationSetting` — matching the iOS `autoOn`/`autoOff` inline strings.
+- Response: `CigRemoteCommandPostResponseBody {status, responseBody}` — standard
+  CIG two-phase: capture `serviceRequestId`, poll results like every other command.
+
+### 11.2 Correction: ClimateAsync is not OnStar-only
+
+The iOS apiName table's `climateAsync → /ClimateAsync/1.0/` was earlier filed
+under "OnStar, ignore for CR-V". Wrong for MY21+: Android's 2G-X (DTCU) module —
+which is what the 2025 CR-V Hybrid uses — posts to `/REST/CIG/ClimateAsync/1.0/{command}`.
+The iOS `cabinTemperatureAsync → /CIG/IdleCabinTemperature/async/` is a different,
+older CIG path; iOS almost certainly appends the `{command}` suffix at runtime
+(same pattern as the lock `alk`/`dulk` role suffix).
+
+### 11.3 Where current settings come from
+
+The screen renders from the dashboard reply, not a dedicated GET:
+`model.dashboard.response.cigdashboard.EvStatus2Gx` carries `acStatus`,
+`acTempVal`, `acTempUnit`, `acDurationSetting`, `acDefStatus`, `acDefAutoSetting`,
+`acDefManualSetting`, `acTotalTime`, `acVariation`, `acTimerSettings`.
+`remotedashboard.ClimateSettingCommandDataInfo` carries
+`temperatureValue`, `unit`, `vin`, `acDefrosterFront/Rear`, `acDriverHeated`,
+`acPassengerHeater`, `acHeaterSteering` (Y/N flags). The live CR-V fixture's
+`evStatus.vehicleInfo.acStatus` and `temperature.cabin` confirm the read-back
+path; richer fields appear once a target temperature is actually set.
+
+### 11.4 Engine-start acSetting (CIG) exact shape, from the APK
+
+`com.honda.common.model.cigmodel.AcSetting` (the `acSetting` object the engine-start
+body carries): `acTempVal`, `acTempUnit`, `acDefSetting`, `acDefFSetting`,
+`acDefRSetting`, `seatHeaterDrSetting`, `seatHeaterAsSetting`, `strHeaterSetting`
+— all strings. Engine-start `CabinTemp` model: `{temp: int, unit: string}`.
