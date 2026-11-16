@@ -298,3 +298,63 @@ on the `srt` call.
 - Whether `usersProfile` PUT is per-key or whole-profile replace.
 - One real `srt` body from the app (Charles/Fiddler) to confirm optional-field
   omission matches Gson behavior.
+
+## K. `acTempVal` — the exact math (ak/d fully decoded)
+
+`ak/q` sets the temperature as:
+
+```java
+String saved = settings.getTemperatureValue();   // CPC value, e.g. "22"
+String unit  = settings.getUnit();               // "F" or "C"
+if (saved != null && !saved.isEmpty())
+    acTempVal = String.valueOf( ak/d.i(Integer.parseInt(saved), unit) );
+```
+
+`ak/d.i` branches on the **vehicle's country code** (from the VIN's market):
+
+- **US vehicles** (`ak/d.d`): if `unit` contains `C`/`c` → value passed through
+  unchanged. Otherwise the value is converted **°C→°F**:
+  `round( x * 9/5 + 32 )`.
+- **CA vehicles** (`ak/d.c`): if `unit` contains `F`/`f` → converted
+  **°F→°C**: `round( (x − 32) * 5/9 )`. Otherwise passed through.
+
+Consequences for a US car (Nick's):
+
+1. `acTempVal` is always a plain decimal integer string — never `"03"`-style
+   level codes (those are legacy-preset only) and never a float.
+2. For the US path to produce sane wire numbers in the displayed unit, the
+   **CPC-stored `temperatureValue` must be Celsius** when `unit` is `"F"`:
+   stored `"22"` + `unit "F"` → wire `acTempVal="72"`, `acTempUnit="F"`.
+   (If CPC instead stored `"72"`, the app would send `"166"` — nonsense — so
+   either CPC stores Celsius, or the US path is never fed an F-unit value;
+   `profile.json` decides which, see below.)
+3. CA vehicles always put Celsius on the wire.
+
+Supporting evidence that CPC values are bare numeric strings: the profile
+mapper parses `temperatureValue` with `Double.parseDouble` for min-value
+validation, and stores settings as `VmSDetail.getsPValues()` — a
+`Map<String,String>` keyed by `temperatureValue`, `geoFenceRadius`, etc.
+
+### K.1 Defroster enabled-string — the honest state
+
+Every defroster literal in the APK is `"Off"` (default init in `tm/j`, `vm/a`)
+or a case-insensitive comparison of the stored server string against it. The
+*enabled* literal is **never present as an app constant** — the app treats
+whatever the server returns as the value and only `.toLowerCase()`s it for
+engine start. So the enabled string is a server property, most likely `"On"`
+(mirroring `"Off"`), which would put `"on"` on the start wire. One read of
+`profile.json` settles it.
+
+### K.2 Clarifying §J.4 on ClimateAsync (review point)
+
+Two separate things, now stated precisely:
+
+- `POST /REST/CIG/ClimateAsync/1.0/temperature` = an **immediate** climate
+  command (precondition now); its body carries the temp the user picked.
+- `POST /REST/NGT/usersProfile/1.0/` = **stores** profile settings
+  (`temperatureValue`, `acDefrosterFront`, …) that the *next engine start*
+  embeds via the builder in §J.2.
+
+Whether the target-temperature screen's Update button also writes CPC is not
+pinned in smali. It does not matter for HA: an HA start that carries its own
+`vehicleControl.acSetting` needs neither call.
