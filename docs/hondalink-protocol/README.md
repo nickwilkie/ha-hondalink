@@ -15,6 +15,11 @@ backend protocol, with an eye toward features the integration does not yet expos
   Third pass (§10): `acSetting` wire fields, server vs app status strings,
   MY21 location / car finder bodies, vehicle-messages inbox, recall GET.
 - `com-classes.txt` — the 171 `COM*` operation classes (class-name prefix = HTTP verb).
+- `android-crosscheck.md` — HondaLink Android 5.5.4 APK decompile: resolves
+  climate-settings endpoint, car finder, status vocabulary, and settles
+  the disputed field names. Read this alongside the iOS docs.
+- `android-endpoints.txt` — all 173 Retrofit verb+path annotations from the
+  Android app (machine-extracted from smali).
 - `bundle/` — catalogs shipped inside the app: `warningLamps.json`,
   `dashboard.json`, `FeatureFilterMapper.json` (FeatureID → filter group),
   `FeatureLocalisationMapper.json`.

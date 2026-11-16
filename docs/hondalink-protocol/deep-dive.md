@@ -293,6 +293,8 @@ fully recovered statically.
 - `role` is a runtime parameter at all three call sites — no static role
   literal exists for locate (unlike lock's inline `alk`/`dulk`). Probe
   `/CIG/cfl/async` with no suffix first, then `/alk`.
+  **[Superseded by Android 5.5.4 — see `android-crosscheck.md` §C]: car
+  finder is `POST /REST/NGT/vehiclelocaterAsync/1.0`, no role suffix at all.**
 
 ### 10.4 Vehicle messages inbox
 
