@@ -403,6 +403,67 @@ def cabin_temperature_unit(body: dict[str, Any]) -> str | None:
     return None
 
 
+# Remote-start climate. The request shape is from a capture of the HondaLink Android app
+# remote-starting this car (docs/hondalink-protocol/android-crosscheck.md section M).
+CLIMATE_OFF = "off"
+CLIMATE_DEFROST = "defrost"
+# The app's three temperature choices (degrees F) and the level code each sends as
+# acTempVal, each seen in the capture.
+CLIMATE_TEMP_CODES = {"67": "05", "72": "04", "77": "03"}
+# What Home Assistant offers; the same either/or choice as the app's Climate Settings.
+# "off" sends the start with no climate block, as before.
+REMOTE_START_CLIMATE_OPTIONS = (CLIMATE_OFF, *CLIMATE_TEMP_CODES, CLIMATE_DEFROST)
+SAVED_CLIMATE_SETTINGS_ID = "REMOTECLIMATESETTINGS"
+
+
+def remote_start_vehicle_control(mode: Any) -> dict[str, Any] | None:
+    """The vehicleControl block for the engine-start body, or None to send none.
+
+    mode is "off", "defrost", or a temperature: "67", "72" or "77". Each block is exactly
+    what the app sent for that choice.
+    """
+    mode = str(mode or CLIMATE_OFF).strip().lower()
+    if mode == CLIMATE_OFF:
+        return None
+    if mode == CLIMATE_DEFROST:
+        return {
+            "acSetting": {"acDefSetting": "autoOn", "acTempVal": "04"},
+            "acTemporarySetting": {"acDefSetting": "manualOn"},
+        }
+    if mode in CLIMATE_TEMP_CODES:
+        return {"acSetting": {"acDefSetting": "autoOn", "acTempVal": CLIMATE_TEMP_CODES[mode]}}
+    raise ValueError(f"Unknown remote start climate mode: {mode!r}")
+
+
+def saved_climate_settings(sync_profile: Any) -> dict[str, Any]:
+    """The climate settings saved from the app, from a SyncSettings profile reply.
+
+    They are the SPValues of the REMOTECLIMATESETTINGS entry (the newest, if several),
+    without the VIN: temperatureValue ("67"/"72"/"77" or ""), unit, acDefrosterFront,
+    acDefrosterRear, acDriverHeated, acPassengerHeater, acHeaterSteering ("On"/"Off").
+    """
+    newest: dict[str, Any] | None = None
+    for setting in _as_list(get_path(sync_profile if isinstance(sync_profile, dict) else {}, "profile.settings")):
+        if not isinstance(setting, dict) or setting.get("SID") != SAVED_CLIMATE_SETTINGS_ID:
+            continue
+        for detail in _as_list(setting.get("SDetails")):
+            if not isinstance(detail, dict) or not isinstance(detail.get("SPValues"), dict):
+                continue
+            if newest is None or (to_float(detail.get("SPOrder")) or 0) >= (to_float(newest.get("SPOrder")) or 0):
+                newest = detail
+    if newest is None:
+        return {}
+    return {key: value for key, value in newest["SPValues"].items() if str(key).lower() != "vin"}
+
+
+def saved_climate_mode(saved: dict[str, Any]) -> str:
+    """The remote_start_vehicle_control mode for the settings saved from the app."""
+    if str(saved.get("acDefrosterFront") or "").strip().lower() == "on":
+        return CLIMATE_DEFROST
+    temperature = str(saved.get("temperatureValue") or "").strip()
+    return temperature if temperature in CLIMATE_TEMP_CODES else CLIMATE_OFF
+
+
 def group_messages(body: dict[str, Any], base: str) -> list[Any]:
     """Collect messages from a `{base}.data[*].messages[*]` block.
 
@@ -649,6 +710,7 @@ ENTITY_REQUIREMENTS: dict[str, tuple[str | None, Callable[[dict[str, Any]], bool
     "start_engine": (FEATURE_REMOTE_START, None),
     "extend_engine": (FEATURE_REMOTE_START, None),
     "stop_engine": (FEATURE_REMOTE_START, None),
+    "remote_start_climate": (FEATURE_REMOTE_START, None),
     "horn": (FEATURE_FIND_MY_CAR, None),
     "lights": (FEATURE_FIND_MY_CAR, None),
     "stop_horn_lights": (FEATURE_FIND_MY_CAR, None),

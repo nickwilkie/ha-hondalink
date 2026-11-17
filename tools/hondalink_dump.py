@@ -3,18 +3,24 @@
 
 Reuses the ha-hondalink integration's own api.py, so the login and requests are
 exactly what Home Assistant sends. Read-only by default: nothing is sent to the
-car unless you pass --wake.
+car unless you pass --wake or --start-climate.
 
 Writes, into ./hondalink_dump_<timestamp>/ :
   vehicles.json         GET /REST/NGT/MyVehicle/1.0           (vehicle list, may include feature flags)
   vehicle.json          GET /REST/NGT/MyVehicle/1.0/{VIN}     (single vehicle record)
   profile.json          GET /REST/NGT/myProfile/1.0/{VIN}     (account / subscription profile)
+  sync_settings.json    GET ws.hondaweb.com/REST/NGT/Settings/SyncSettings/1.0/user/profile
+                        (settings the app syncs, including its saved remote-climate choices)
+  climate_settings.json those saved climate choices, and the climate block a remote start
+                        would carry for them
   dashboard.json        POST /REST/NGT/CIG/dbd/latest/{VIN}   (the status data the integration polls)
   wake_result.json      only with --wake (POST /REST/NGT/CIG/dbd/async, asks the car for fresh data)
   probe_<name>.json     only with --probe: read-only endpoints found in the iOS app (see
                         docs/hondalink-protocol/) that answered with JSON
   probe_summary.txt     only with --probe: every URL tried, its HTTP status and what came back
   probe_errors.json     only with --probe: Honda's JSON error replies, which often say what was wrong
+  start_climate.json    only with --start-climate: the request sent, Honda's replies, and the
+                        car's status afterwards
   fields.txt            every leaf field from all of the above as "path = value", easiest to read
   errors.txt            any request that failed, with the error message
 
@@ -27,14 +33,30 @@ Usage:
   python3 hondalink_dump.py --integration-dir /path/to/hondalink
   python3 hondalink_dump.py --integration-dir ... --vin <VIN> --wake
   python3 hondalink_dump.py --integration-dir ... --probe
+  python3 hondalink_dump.py --integration-dir ... --start-climate defrost
+  python3 hondalink_dump.py --integration-dir ... --start-climate 72 --defrost-front on
 
 --probe tries 18 read-only endpoints on Honda's servers, using the HTTP method the app
 uses where it is known. None of them is a vehicle command: nothing reaches the car.
 Paths and methods come from the app, but the host and VIN placement are guesses, so
 expect most attempts to fail; probe_summary.txt shows which ones didn't.
 
+--start-climate REMOTE-STARTS THE CAR with a climate block attached, in the form the
+HondaLink app sends (docs/hondalink-protocol/android-crosscheck.md section M). Only run it
+with the car outdoors and where you can see it. Give it:
+  defrost   the block the app sends with the defroster chosen
+  67|72|77  the block the app sends with that temperature (F) chosen
+  saved     whatever is saved from the app's Climate Settings
+  plain     no climate block: the start the integration has always sent
+--start-extra JSON merges more fields into the request, to try other body shapes without
+editing code, e.g.
+  --start-climate plain --start-extra '{"vehicleControl": {"acSetting": {"acTempVal": "05"}}}'
+You are shown the exact request and must type START to send it. If Honda refuses it, the
+script offers to send the plain start as a control, and it offers to stop the engine
+afterwards. It needs the remote PIN (HONDALINK_PIN, or you are prompted).
+
 Credentials come from HONDALINK_EMAIL / HONDALINK_PASSWORD (and optionally
-HONDALINK_VIN), or you are prompted. The PIN is not needed for these reads.
+HONDALINK_VIN), or you are prompted. The PIN is not needed for the reads.
 """
 from __future__ import annotations
 
@@ -69,7 +91,7 @@ SECRET_KEY_PARTS = (
     "latitude", "longitude", "device", "plate", "license",
 )
 # Exact match only ("city" would otherwise hit velocity/batteryCapacity, "pin" hits spinner):
-SECRET_KEYS_EXACT = {"pin", "vin", "lat", "lon", "lng", "city", "zip", "state_code", "name"}
+SECRET_KEYS_EXACT = {"pin", "vin", "lat", "lon", "lng", "city", "zip", "state_code", "name", "spguid"}
 # Seen in the enrollment reply and vehicle record; caught by neither rule above.
 SECRET_KEYS_EXACT |= {
     "homecity", "mailingcity", "homestate", "mailingstate", "vinheader", "ahmglobalcode",
@@ -80,7 +102,13 @@ SAFE_KEYS = {
     "plugstatus", "lightstate", "openstate", "closestate", "lockstate",
     "pressuredata", "deviceid_type", "commandstatus",
 }
-VIN_RE = re.compile(r"\b[A-HJ-NPR-Z0-9]{17}\b")
+# Secret-looking keys that hold a list/dict worth looking inside (each field in it is still
+# redacted by the rules above). The whole myProfile reply sits under "devices".
+CONTAINER_KEYS = {"devices"}
+# Not \b: the settings sync has keys like "NPS_RC_EXECUTED_<VIN>", and "_" is a word character.
+VIN_RE = re.compile(r"(?<![A-Za-z0-9])[A-HJ-NPR-Z0-9]{17}(?![A-Za-z0-9])")
+# Account profile IDs that appear inside the settings sync's status messages.
+PROFILE_ID_RE = re.compile(r"\b[A-Z]{3}\d{3}[0-9a-f]{32}\b")
 
 class Probe(NamedTuple):
     name: str
@@ -140,6 +168,11 @@ def load_api(integration_dir: Path):
     return importlib.import_module("hondalink_dump_pkg.api")
 
 
+def load_util():
+    """The integration's util.py (no Home Assistant imports); call after load_api."""
+    return importlib.import_module("hondalink_dump_pkg.util")
+
+
 def find_integration_dir(arg: str | None) -> Path:
     candidates = [arg] if arg else DEFAULT_DIRS
     for cand in candidates:
@@ -160,18 +193,23 @@ def is_secret_key(key: str) -> bool:
     return k in SECRET_KEYS_EXACT or any(part in k for part in SECRET_KEY_PARTS)
 
 
+def scrub(text: str, vins: set[str]) -> str:
+    for vin in vins:
+        text = text.replace(vin, "VIN-REDACTED")
+    return PROFILE_ID_RE.sub("PROFILE-ID-REDACTED", VIN_RE.sub("VIN-REDACTED", text))
+
+
 def redact(value: Any, vins: set[str], keep: frozenset[str] = frozenset()) -> Any:
     if isinstance(value, dict):
-        return {k: ("**REDACTED**" if is_secret_key(str(k)) and str(k) not in keep and v not in (None, "", [], {})
+        return {scrub(str(k), vins): (
+                    "**REDACTED**" if is_secret_key(str(k)) and str(k) not in keep and v not in (None, "", [], {})
+                    and not (str(k).lower() in CONTAINER_KEYS and isinstance(v, (dict, list)))
                     else redact(v, vins, keep))
                 for k, v in value.items()}
     if isinstance(value, list):
         return [redact(v, vins, keep) for v in value]
     if isinstance(value, str):
-        out = value
-        for vin in vins:
-            out = out.replace(vin, "VIN-REDACTED")
-        return VIN_RE.sub("VIN-REDACTED", out)
+        return scrub(value, vins)
     return value
 
 
@@ -288,14 +326,148 @@ async def probe_endpoints(session, api, vin: str | None, hosts=None, probes=PROB
     return found, lines, raw_text
 
 
+def climate_summary(util_mod, sync_settings: Any) -> dict[str, Any]:
+    """The climate choices saved from the app and the block a remote start would carry."""
+    saved = util_mod.saved_climate_settings(sync_settings)
+    mode = util_mod.saved_climate_mode(saved)
+    return {
+        "saved_settings": saved,
+        "mode": mode,
+        "start_would_send_vehicleControl": util_mod.remote_start_vehicle_control(mode),
+        "note": "saved_settings is what the HondaLink app's Climate Settings screen last saved.",
+    }
+
+
+def start_vehicle_control(choice: str, util_mod, summary: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The vehicleControl block for --start-climate; exits with a message if it can't be built."""
+    choice = choice.strip().lower()
+    if choice == "plain":
+        return None
+    if choice == "saved":
+        if not summary:
+            raise SystemExit("--start-climate saved: the saved climate settings could not be read.")
+        return summary["start_would_send_vehicleControl"]
+    try:
+        return util_mod.remote_start_vehicle_control(choice)
+    except ValueError:
+        raise SystemExit("--start-climate takes defrost, 67, 72, 77, saved or plain.") from None
+
+
+def merge(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
+    """base with extra laid over it; dicts are merged key by key."""
+    out = dict(base)
+    for key, value in extra.items():
+        out[key] = merge(out[key], value) if isinstance(out.get(key), dict) and isinstance(value, dict) else value
+    return out
+
+
+def start_request(vehicle_control: dict[str, Any] | None, extra: dict[str, Any] | None) -> dict[str, Any]:
+    """The engine-start body without the VIN and PIN."""
+    request: dict[str, Any] = {"extend": False}
+    if vehicle_control:
+        request["vehicleControl"] = vehicle_control
+    return merge(request, extra or {})
+
+
+def send_start(api, request: dict[str, Any]):
+    return api._async_cig_command("eng", "srt", {"device": api._vin(), "pin": api._pin(), **request})
+
+
+def confirm(question: str, word: str) -> bool:
+    try:
+        return input(f"{question}\nType {word} to send it, anything else to skip: ").strip() == word
+    except EOFError:
+        return False
+
+
+def status_snapshot(util_mod, dashboard: Any) -> dict[str, Any]:
+    body = util_mod.status_body(dashboard) if isinstance(dashboard, dict) else {}
+    return {
+        "remote_engine_status": util_mod.remote_engine_status(body),
+        "remote_start": util_mod.remote_start_attributes(body),
+        "cabin_temperature": util_mod.cabin_temperature(body),
+        "cabin_temperature_unit": util_mod.cabin_temperature_unit(body),
+        "evStatus": util_mod.get_path(body, "evStatus"),
+    }
+
+
+async def send_command(api, util_mod, label: str, request: dict[str, Any], send, *, offer_stop: bool,
+                       control=None) -> dict[str, Any]:
+    """Send one car command and record the reply, the car's status afterwards, and the stop.
+
+    control, if given, is a plain command offered when the first one fails, to tell a
+    refused request body from a car that can't be started right now.
+    """
+    record: dict[str, Any] = {"request": request}
+
+    async def refreshed_status() -> dict[str, Any]:
+        try:
+            await api.async_request_dashboard_update(api.vin)
+        except Exception as err:  # noqa: BLE001  (a failed refresh still leaves the last status)
+            print(f"  refresh failed ({type(err).__name__}); reading the last status instead")
+        return status_snapshot(util_mod, await api.async_get_dashboard_latest(api.vin))
+
+    print(f"Sending {label}; waiting for the car to answer (up to 75 seconds)…")
+    try:
+        result = await send()
+        record["result"] = {"request_id": result.request_id, "response": result.response}
+        print(f"  ok    {label}")
+    except Exception as err:  # noqa: BLE001  (the error text is the finding)
+        record["error"] = f"{type(err).__name__}: {err}"
+        print(f"  FAIL  {label}: {type(err).__name__}: {err}")
+        if control and confirm(
+            "Send the plain start (no climate block) as a control? If it works, Honda refused the "
+            "climate block; if it fails too, the car can't be remote-started right now.", "START"
+        ):
+            try:
+                result = await control()
+                record["control_result"] = {"request_id": result.request_id, "response": result.response}
+                print("  ok    plain start (control)")
+            except Exception as err2:  # noqa: BLE001
+                record["control_error"] = f"{type(err2).__name__}: {err2}"
+                print(f"  FAIL  plain start (control): {type(err2).__name__}: {err2}")
+    try:
+        record["status_after"] = await refreshed_status()
+        print(f"  status after: {json.dumps(record['status_after'].get('remote_engine_status'))}")
+    except Exception as err:  # noqa: BLE001
+        record["status_after_error"] = f"{type(err).__name__}: {err}"
+    if offer_stop:
+        try:
+            observed = input(
+                "Look at the car now. What do you see (engine on? defroster on? temperature shown)?\n"
+                "Type a note for the record, then Enter: "
+            ).strip()
+        except EOFError:
+            observed = ""
+        record["observed"] = observed
+        if confirm("Stop the engine now?", "STOP"):
+            try:
+                stopped = await api.async_stop_engine()
+                record["stop_result"] = {"request_id": stopped.request_id, "response": stopped.response}
+                print("  ok    engine stop")
+            except Exception as err:  # noqa: BLE001
+                record["stop_error"] = f"{type(err).__name__}: {err}"
+                print(f"  FAIL  engine stop: {type(err).__name__}: {err}  (stop it from the HondaLink app or the key)")
+        else:
+            print("  Engine left running; it stops by itself after the remote-start time.")
+    return record
+
+
 async def run(args: argparse.Namespace) -> int:
     integration_dir = find_integration_dir(args.integration_dir)
     api_mod = load_api(integration_dir)
+    util_mod = load_util()
+    sends_command = bool(args.start_climate)
+    if sends_command and not hasattr(util_mod, "remote_start_vehicle_control"):
+        raise SystemExit(f"{integration_dir} is an older copy of the integration without climate support.")
     import aiohttp  # noqa: PLC0415  (imported late so a missing integration dir errors first)
 
     email = os.environ.get("HONDALINK_EMAIL") or input("HondaLink email: ").strip()
     password = os.environ.get("HONDALINK_PASSWORD") or getpass.getpass("HondaLink password: ")
     vin = args.vin or os.environ.get("HONDALINK_VIN") or None
+    pin = None
+    if sends_command:
+        pin = os.environ.get("HONDALINK_PIN") or getpass.getpass("HondaLink remote PIN: ").strip()
 
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     out = Path(args.out or f"hondalink_dump_{stamp}")
@@ -310,7 +482,7 @@ async def run(args: argparse.Namespace) -> int:
     probe_raw_text: dict[str, str] = {}
 
     async with aiohttp.ClientSession() as session:
-        api = api_mod.HondaLinkAPI(session, email=email, password=password, pin=None, vin=vin)
+        api = api_mod.HondaLinkAPI(session, email=email, password=password, pin=pin, vin=vin)
 
         async def grab(name: str, coro_fn):
             try:
@@ -343,6 +515,34 @@ async def run(args: argparse.Namespace) -> int:
             api.vin = vin
             await grab("vehicle", lambda: api.async_get_vehicle_by_vin(vin))
             await grab("profile", lambda: api.async_get_profile(vin))
+            summary = None
+            if hasattr(api, "async_get_sync_settings") and hasattr(util_mod, "saved_climate_settings"):
+                await grab("sync_settings", api.async_get_sync_settings)
+                if "sync_settings" in results:
+                    summary = climate_summary(util_mod, results["sync_settings"])
+                    results["climate_settings"] = summary
+                    print(f"  saved climate settings: {json.dumps(summary['saved_settings'])}")
+            if args.start_climate:
+                try:
+                    request = start_request(start_vehicle_control(args.start_climate, util_mod, summary), args.start_extra)
+                    problem = None
+                except SystemExit as err:  # keep going so the read-only dump is still written
+                    request, problem = None, str(err)
+                plain = request == start_request(None, None)
+                if problem:
+                    print(f"\nNot sending a remote start: {problem}")
+                    results["start_climate"] = {"not_sent": problem}
+                else:
+                    print("\nRemote start with this request (plus VIN and PIN):")
+                    print("  " + json.dumps(request))
+                    if confirm("This STARTS THE CAR. Only continue if it is outdoors and you can see it.", "START"):
+                        results["start_climate"] = await send_command(
+                            api, util_mod, "plain remote start" if plain else "remote start with climate", request,
+                            lambda: send_start(api, request), offer_stop=True,
+                            control=None if plain else lambda: send_start(api, start_request(None, None)),
+                        )
+                    else:
+                        print("  Skipped.")
             if args.wake:
                 print("Asking the car for fresh data (--wake), this can take up to a minute…")
 
@@ -399,6 +599,16 @@ async def run(args: argparse.Namespace) -> int:
     return 0 if results else 1
 
 
+def json_object(text: str) -> dict[str, Any]:
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError as err:
+        raise argparse.ArgumentTypeError(f"not valid JSON: {err}") from None
+    if not isinstance(value, dict):
+        raise argparse.ArgumentTypeError("must be a JSON object, e.g. '{\"isChanged\": true}'")
+    return value
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Dump HondaLink API responses (read-only by default).")
     parser.add_argument("--integration-dir", help="Folder containing the integration's api.py and const.py")
@@ -407,9 +617,19 @@ def main() -> None:
                         help="Ask the car to report fresh data first (same as the Refresh button; pings the car)")
     parser.add_argument("--probe", action="store_true",
                         help="Also try read-only endpoints found in the iOS app (no vehicle commands)")
+    parser.add_argument("--start-climate", metavar="defrost|67|72|77|saved|plain",
+                        help="STARTS THE CAR, with the climate block for that choice (plain: none). "
+                             "Asks before sending")
+    parser.add_argument("--start-extra", metavar="JSON", type=json_object,
+                        help="With --start-climate: a JSON object merged into the start request")
     parser.add_argument("--raw", action="store_true", help="Also write unredacted copies to raw/")
     parser.add_argument("--out", help="Output folder (default: hondalink_dump_<timestamp>)")
-    sys.exit(asyncio.run(run(parser.parse_args())))
+    args = parser.parse_args()
+    if args.start_extra and not args.start_climate:
+        parser.error("--start-extra only applies with --start-climate")
+    if args.start_climate and args.start_climate.strip().lower() not in ("defrost", "67", "72", "77", "saved", "plain"):
+        parser.error("--start-climate takes defrost, 67, 72, 77, saved or plain")
+    sys.exit(asyncio.run(run(args)))
 
 
 if __name__ == "__main__":

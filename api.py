@@ -34,6 +34,7 @@ from .const import (
     HONDALINK_SYSTEM_ID,
     HONDA_HEADER_VERSION,
     IDENTITY_BASE,
+    SETTINGS_BASE,
     LEGACY_LOCK_COMMAND,
     LEGACY_UNLOCK_COMMAND,
     RECALLS_URL,
@@ -314,11 +315,26 @@ class HondaLinkAPI:
         result = await self._poll_cig_result("dbd", request_id, timeout=60, poll_interval=3)
         return HondaLinkCommandResult(request_id, result)
 
-    async def async_start_engine(self, *, extend: bool = False) -> HondaLinkCommandResult:
-        return await self._async_cig_command(
-            "eng",
-            "srt",
-            {"device": self._vin(), "pin": self._pin(), "extend": bool(extend)},
+    async def async_start_engine(
+        self,
+        *,
+        extend: bool = False,
+        vehicle_control: dict[str, Any] | None = None,
+    ) -> HondaLinkCommandResult:
+        """Remote start. vehicle_control is the optional climate block the app sends with it
+        (util.remote_start_vehicle_control); without it the car uses its own default."""
+        body: dict[str, Any] = {"device": self._vin(), "pin": self._pin(), "extend": bool(extend)}
+        if vehicle_control:
+            body["vehicleControl"] = vehicle_control
+        return await self._async_cig_command("eng", "srt", body)
+
+    async def async_get_sync_settings(self) -> dict[str, Any]:
+        """The settings the app syncs to Honda, including its saved remote-climate choices."""
+        await self.async_ensure_login()
+        return await self._send(
+            "GET",
+            f"{SETTINGS_BASE}/REST/NGT/Settings/SyncSettings/1.0/user/profile?templateId=HLC&templateVersion=1.1",
+            headers=self._api_headers(),
         )
 
     async def async_stop_engine(self) -> HondaLinkCommandResult:

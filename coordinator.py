@@ -21,7 +21,7 @@ from .const import (
     ENROLLMENT_CHECK_INTERVAL,
     RECALL_CHECK_INTERVAL,
 )
-from .util import enrollment_status, open_recalls, recall_campaigns
+from .util import CLIMATE_OFF, enrollment_status, open_recalls, recall_campaigns, remote_start_vehicle_control
 
 # Errors from the slow side checks (enrollment, recalls). They are logged and the last
 # known value is kept; they never fail the dashboard update.
@@ -37,6 +37,8 @@ class HondaLinkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.enrollment_status: str | None = None
         self.open_recalls: int | None = None
         self.recalls: list[dict[str, Any]] = []
+        # Chosen with the "Remote start climate" select; sent with every remote start.
+        self.remote_start_climate: str = CLIMATE_OFF
         self._checked_at: dict[str, float] = {}
         interval = int(entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))
         super().__init__(
@@ -98,12 +100,20 @@ class HondaLinkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_refresh()
 
     async def async_start_engine(self) -> None:
-        await self._run_command(self.api.async_start_engine)
+        await self._run_command(
+            lambda: self.api.async_start_engine(
+                vehicle_control=remote_start_vehicle_control(self.remote_start_climate)
+            )
+        )
 
     async def async_extend_engine(self) -> None:
         # The app's "add 10 minutes": the start command with extend set. The car allows one
-        # extension of a running remote start.
-        await self._run_command(lambda: self.api.async_start_engine(extend=True))
+        # extension of a running remote start. Like the app, it carries the climate block.
+        await self._run_command(
+            lambda: self.api.async_start_engine(
+                extend=True, vehicle_control=remote_start_vehicle_control(self.remote_start_climate)
+            )
+        )
 
     async def async_stop_engine(self) -> None:
         await self._run_command(self.api.async_stop_engine)

@@ -358,3 +358,94 @@ Two separate things, now stated precisely:
 Whether the target-temperature screen's Update button also writes CPC is not
 pinned in smali. It does not matter for HA: an HA start that carries its own
 `vehicleControl.acSetting` needs neither call.
+
+## L. Live results, 2025 CR-V Hybrid (first run of the dump tool's climate probes)
+
+What Honda's servers actually said, as opposed to what the APK implies.
+
+- **Start with a climate block was refused.** `POST /REST/NGT/CIG/eng/async/srt` with
+  `{device, pin, extend: false, vehicleControl: {acSetting: {acTempVal: "72",
+  acTempUnit: "F"}}}` returned HTTP 500, `status: failure`, `errorCode: 0000-00-1001`,
+  "We are unable to complete your request. Please try again later." It did carry a
+  `cigServiceRequestId`. The car did not start (`resStatus` stayed `OFF`).
+  **Not yet known** whether the body was the cause: no plain start was sent in the same
+  conditions (doors unlocked, fuel 15 %, master warning lamp on). The tool now offers
+  that control.
+- **`myProfile` holds no climate keys for this account.** The whole reply sits under one
+  top-level key, `devices`; none of `temperatureValue`, `acDefrosterFront`, … appear
+  anywhere in it. Either nothing has been saved from the app yet, or §J.3's read path is
+  not where this account's settings live.
+- **The engine-stop result reveals the result vocabulary.** A stop sent with the engine
+  off succeeded and returned:
+
+  ```json
+  {"ignition": "ignitionOff", "resultCode": "0",
+   "vehicleControl": {"cabinTemperature": {"value": 224, "unit": "c"},
+                      "vehicleStartStatus": "stop",
+                      "acStatus": {"acTempVal": "00", "acDefSetting": "unknown"}}}
+  ```
+
+  So on this car the result side uses `acStatus.acTempVal` as a two-character string
+  (`"00"` with the engine off) and `acDefSetting`, not `acDefFSetting`/`acDefRSetting`.
+  That is the vocabulary §I.1 called "legacy CIG" (`acTempVal` level codes `"03"`/`"04"`/
+  `"05"`, defroster under `acDefSetting`), which makes the legacy request shape a
+  candidate for this car too. `cabinTemperature` 224 is a "no reading" value.
+
+## M. Ground truth: a capture of the app (mitmproxy, HondaLink Android, 2025 CR-V Hybrid)
+
+Nick captured the Android app's own traffic while changing Climate Settings and
+remote-starting the car. This supersedes the static-analysis guesses above wherever they
+disagree; sections J, K and the 2G-X half of I.1 do not describe this car.
+
+### M.1 The start request the app really sends
+
+With the defroster chosen in Climate Settings:
+
+```
+POST https://wsc.hondaweb.com/REST/NGT/CIG/eng/async/srt
+{"device": "<VIN>", "extend": false, "pin": "<PIN>",
+ "vehicleControl": {
+   "acSetting":          {"acDefSetting": "autoOn", "acTempVal": "04"},
+   "acTemporarySetting": {"acDefSetting": "manualOn"}}}
+-> 200 {"status": "Success", "responseBody": {"cigServiceRequestId": "..."}}
+```
+
+- No `command`, `isChanged`, `filters`, `acTempUnit`, `acDefFSetting` or `acDefRSetting`.
+  This is the "legacy CIG" vocabulary of I.1, not the 2G-X one: `acTempVal` is a level
+  code, not degrees. That is why the degrees body in section L got HTTP 500.
+- The extend request is the same body with `"extend": true`.
+- `acTempVal` was `"04"` with the defroster chosen (I.1 had predicted `""`).
+- With a temperature chosen instead, a second capture showed `vehicleControl` is just
+  `{"acSetting": {"acDefSetting": "autoOn", "acTempVal": <code>}}`, with no
+  `acTemporarySetting`: 67 F -> `"05"`, 72 F -> `"04"`, 77 F -> `"03"`. All four choices
+  got `status: Success`.
+- Stop, lock (`alk`), unlock (`dulk`) send `{device, pin}` only, as the integration does.
+- The `cigServiceRequestId` equals the request's `hondaHeaderType.messageId` header. The
+  app also sends `hondaHeaderType.role: PRIMARY` on commands.
+- The app never polls `/CIG/{eng}/results/...`; results reach it another way (it fetches
+  `POST /REST/CIG/services/1.0/token`, presumably for the MQTT channel). The
+  integration's polling still works.
+- After a command the app asks for a narrow refresh:
+  `POST /REST/NGT/CIG/dbd/async/` with `filters: ["temperature", "remoteEngineStart"]`.
+
+### M.2 Where Climate Settings are saved: SyncSettings on ws.hondaweb.com
+
+Not `myProfile` (that reply holds only program enrolments under `devices`), and not
+`usersProfile` or `ClimateAsync`; the app called neither.
+
+- Read: `GET https://ws.hondaweb.com/REST/NGT/Settings/SyncSettings/1.0/user/profile?templateId=HLC&templateVersion=1.1`
+- Write: `PUT https://ws.hondaweb.com/REST/NGT/Settings/SyncSettings/1.0/user/syncProfile`
+- The entry is `profile.settings[]` with `SID: "REMOTECLIMATESETTINGS"`; its
+  `SDetails[].SPValues` holds `temperatureValue` (`"67"`, `"72"`, `"77"` or `""`),
+  `unit` (`"F"`), `acDefrosterFront`, `acDefrosterRear`, `acDriverHeated`,
+  `acPassengerHeater`, `acHeaterSteering` (`"On"`/`"Off"`) and `vin`.
+- Choosing the defroster in the app sets `acDefrosterFront: "On"` and clears
+  `temperatureValue`: temperature and defroster are one either/or choice.
+- A redacted reply is in `tests/fixtures/sync_settings_2025_crv_hybrid.json`.
+
+### M.3 Other corrections
+
+- Car finder is `POST /REST/NGT/CIG/cfl/async/` with `{device, pin}`, contrary to section C.
+- `GET /REST/NGT/VehicleMessage/Details/1.0/{VIN}` fails for the app too (HTTP 400/500).
+- `POST /REST/SPT/VehiclePartsHealth/1.0` with `{"vin": ...}` answers, with an empty
+  `parts` list for this car.

@@ -69,4 +69,8 @@ All read from the fixture paths; add translation entries and keep keys snake_cas
 
 ## Later (not in this round)
 - The start command accepts `extend: true` (see `api.py`), which no button uses yet.
-- New commands (e.g. climate presets) need a capture of the HondaLink app's traffic first.
+- Remote-start climate: done in 0.6.0. The **Remote start climate** select (Car default,
+  67/72/77 F, Defrost) is sent with Start engine and Extend remote start. Every request
+  is copied from captures of the app (`docs/hondalink-protocol/android-crosscheck.md`
+  section M). Not done: mirroring the choice saved in the app (SyncSettings), and seat or
+  steering-wheel heaters, which the app stores but did not send for this car.
