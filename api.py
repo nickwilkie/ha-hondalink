@@ -34,6 +34,7 @@ from .const import (
     HONDALINK_SYSTEM_ID,
     HONDA_HEADER_VERSION,
     IDENTITY_BASE,
+    SETTINGS_BASE,
     LEGACY_LOCK_COMMAND,
     LEGACY_UNLOCK_COMMAND,
     RECALLS_URL,
@@ -318,41 +319,22 @@ class HondaLinkAPI:
         self,
         *,
         extend: bool = False,
-        ac_setting: dict[str, str] | None = None,
+        vehicle_control: dict[str, Any] | None = None,
     ) -> HondaLinkCommandResult:
-        """Remote start. ac_setting is the optional climate block the app sends with it.
-
-        Without ac_setting the body is the one that has always worked for this car. The
-        block's shape (util.build_ac_setting) comes from the Android app and is not yet
-        confirmed against the live service.
-        """
+        """Remote start. vehicle_control is the optional climate block the app sends with it
+        (util.remote_start_vehicle_control); without it the car uses its own default."""
         body: dict[str, Any] = {"device": self._vin(), "pin": self._pin(), "extend": bool(extend)}
-        if ac_setting:
-            body["vehicleControl"] = {"acSetting": dict(ac_setting)}
+        if vehicle_control:
+            body["vehicleControl"] = vehicle_control
         return await self._async_cig_command("eng", "srt", body)
 
-    async def async_set_climate_temperature(self, temperature: int, unit: str = "F") -> HondaLinkCommandResult:
-        """The app's Climate Settings "Update": an immediate climate command.
-
-        POST /REST/CIG/ClimateAsync/1.0/temperature, from the Android app
-        (docs/hondalink-protocol/deep-dive.md section 11). Not yet confirmed live.
-        """
-        body = {
-            "device": self._vin(),
-            "pin": self._pin(),
-            "vehicleControl": {
-                "acSetting": {
-                    "acTempVal": str(int(temperature)),
-                    "acTempUnit": "C" if str(unit).strip().upper().startswith("C") else "F",
-                    "acDurationSetting": "",
-                    "acDefSetting": "",
-                }
-            },
-        }
-        return await self._async_command(
-            "/REST/CIG/ClimateAsync/1.0/temperature",
-            "/REST/NGT/getClimateResult/1.0/temperature/{request_id}",
-            body,
+    async def async_get_sync_settings(self) -> dict[str, Any]:
+        """The settings the app syncs to Honda, including its saved remote-climate choices."""
+        await self.async_ensure_login()
+        return await self._send(
+            "GET",
+            f"{SETTINGS_BASE}/REST/NGT/Settings/SyncSettings/1.0/user/profile?templateId=HLC&templateVersion=1.1",
+            headers=self._api_headers(),
         )
 
     async def async_stop_engine(self) -> HondaLinkCommandResult:
@@ -423,28 +405,10 @@ class HondaLinkAPI:
         timeout: int = 75,
         poll_interval: int = 3,
     ) -> HondaLinkCommandResult:
-        return await self._async_command(
-            f"/REST/NGT/CIG/{engine}/async/{command}",
-            f"/REST/NGT/CIG/{engine}/results/{{request_id}}",
-            body,
-            timeout=timeout,
-            poll_interval=poll_interval,
-        )
-
-    async def _async_command(
-        self,
-        post_path: str,
-        result_path: str,
-        body: dict[str, Any],
-        *,
-        timeout: int = 75,
-        poll_interval: int = 3,
-    ) -> HondaLinkCommandResult:
-        """Send a command, then poll result_path (with {request_id} filled in) until it ends."""
         try:
             data = await self._request_api(
                 "POST",
-                post_path,
+                f"/REST/NGT/CIG/{engine}/async/{command}",
                 json_body=body,
             )
         except HondaLinkError as err:
@@ -460,9 +424,7 @@ class HondaLinkAPI:
         if not request_id:
             return HondaLinkCommandResult(None, data)
 
-        result = await self._poll_result(
-            result_path.format(request_id=request_id), timeout, poll_interval
-        )
+        result = await self._poll_cig_result(engine, request_id, timeout, poll_interval)
         return HondaLinkCommandResult(request_id, result)
 
     async def _poll_cig_result(
@@ -472,16 +434,14 @@ class HondaLinkAPI:
         timeout: int,
         poll_interval: int,
     ) -> dict[str, Any]:
-        return await self._poll_result(
-            f"/REST/NGT/CIG/{engine}/results/{request_id}", timeout, poll_interval
-        )
-
-    async def _poll_result(self, path: str, timeout: int, poll_interval: int) -> dict[str, Any]:
         deadline = time.monotonic() + timeout
         last_data: dict[str, Any] = {}
 
         while time.monotonic() < deadline:
-            data = await self._request_api("GET", path)
+            data = await self._request_api(
+                "GET",
+                f"/REST/NGT/CIG/{engine}/results/{request_id}",
+            )
             last_data = data
             response_body = data.get("responseBody") or {}
             status = _lower_status(data.get("status") or response_body.get("status") or response_body.get("commandStatus"))

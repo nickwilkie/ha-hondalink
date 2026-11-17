@@ -49,6 +49,8 @@ APP_USER_AGENT = "HondaLink/5.0.51 (Android)"
 
 IDENTITY_BASE = "https://identity.services.honda.com"
 API_BASE = "https://wsc.hondaweb.com"
+# The app's settings sync (saved climate settings) is served from this host instead.
+SETTINGS_BASE = "https://ws.hondaweb.com"
 
 HONDALINK_BUSINESS_ID = "HONDALINK CONNECT"
 HONDALINK_SYSTEM_ID = "com.honda.hondalink.cv_android"

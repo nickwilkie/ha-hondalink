@@ -1,0 +1,55 @@
+{
+  "profile": {
+    "template": {
+      "templateId": "HLC",
+      "templateVersion": "1.1"
+    },
+    "settings": [
+      {
+        "SID": "USERDATA",
+        "SDetails": [
+          {
+            "SPEvent": "ADD",
+            "SPGUID": "**REDACTED**",
+            "SPOrder": 1794875826369,
+            "SPValues": {
+              "NPS_RC_EXECUTED_VIN-REDACTED": "Y",
+              "timezone": "CST",
+              "language": "en"
+            }
+          }
+        ]
+      },
+      {
+        "SID": "REMOTECLIMATESETTINGS",
+        "SDetails": [
+          {
+            "SPEvent": "ADD",
+            "SPGUID": "**REDACTED**",
+            "SPOrder": 1794875671364,
+            "SPValues": {
+              "unit": "F",
+              "acPassengerHeater": "Off",
+              "acDriverHeated": "Off",
+              "acHeaterSteering": "Off",
+              "vin": "**REDACTED**",
+              "acDefrosterFront": "On",
+              "acDefrosterRear": "Off",
+              "temperatureValue": ""
+            }
+          }
+        ]
+      }
+    ],
+    "lastSyncTime": 1794875916362,
+    "message": {
+      "status": "SUCCESS",
+      "header": {
+        "errorMessage": "Profile PROFILE-ID-REDACTED created.",
+        "errorCode": "200001",
+        "code": "PROVIDER",
+        "errorType": "PROVIDER"
+      }
+    }
+  }
+}

@@ -87,6 +87,15 @@
     "lock": {
       "doors": {"name": "Doors"}
     },
+    "select": {
+      "remote_start_climate": {
+        "name": "Remote start climate",
+        "state": {
+          "off": "Car default",
+          "defrost": "Defrost"
+        }
+      }
+    },
     "device_tracker": {
       "location": {"name": "Location"}
     }

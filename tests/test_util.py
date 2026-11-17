@@ -465,6 +465,8 @@ ALL_ENTITY_KEYS = {
     "rear_left_door_unlocked", "rear_right_door_unlocked",
     # button
     "start_engine", "extend_engine", "stop_engine", "horn", "lights", "stop_horn_lights", "refresh",
+    # select
+    "remote_start_climate",
     # lock, device_tracker
     "doors_lock", "location",
 }
@@ -526,7 +528,7 @@ def test_car_with_tire_pressure_but_no_remote_start(body) -> None:
     features = (util.feature_ids(load_json("feature_list_2025_crv_hybrid.json")) | {"50025"}) - {"50037"}
     created = _created(features, body)
     assert TIRE_KEYS_HA <= created
-    assert not {"start_engine", "extend_engine", "stop_engine", "remote_engine_running", "remote_engine_status"} & created
+    assert not {"start_engine", "extend_engine", "stop_engine", "remote_start_climate", "remote_engine_running", "remote_engine_status"} & created
 
 
 def test_data_presence_gates() -> None:

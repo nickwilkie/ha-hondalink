@@ -69,14 +69,10 @@ All read from the fixture paths; add translation entries and keep keys snake_cas
 
 ## Later (not in this round)
 - The start command accepts `extend: true` (see `api.py`), which no button uses yet.
-- Remote-start climate (desired cabin temperature, defroster). The request shapes are in
-  `docs/hondalink-protocol/android-crosscheck.md` sections J and K, from the Android app.
-  `api.async_start_engine(ac_setting=...)`, `api.async_set_climate_temperature` and the
-  helpers in `util.py` (`build_ac_setting`, `saved_climate_settings`,
-  `ac_setting_from_saved`) implement them, but nothing in HA uses them yet: the default
-  start is unchanged. Before adding HA entities, Nick runs `tools/hondalink_dump.py`:
-  1. plain run: `climate_settings.json` shows how the profile stores the temperature and
-     the string for an enabled defroster;
-  2. `--probe`: `climate_status` and `users_profile`;
-  3. `--start-climate saved` (starts the car): whether Honda accepts the climate block and
-     the car acts on it.
+- Remote-start climate. 0.6.0 adds the **Remote start climate** select (Car default /
+  Defrost), sent with Start engine and Extend remote start. The request is copied from a
+  capture of the app (`docs/hondalink-protocol/android-crosscheck.md` section M).
+  Still to do: the three temperature choices (67/72/77 F). Their `acTempVal` codes in
+  `util.UNVERIFIED_CLIMATE_TEMP_CODES` are from the app's code, not a capture; once a
+  capture (or `tools/hondalink_dump.py --start-climate 72` plus a look at the car)
+  confirms them, add them to `util.REMOTE_START_CLIMATE_OPTIONS` and the translations.

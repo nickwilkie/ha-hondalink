@@ -403,135 +403,65 @@ def cabin_temperature_unit(body: dict[str, Any]) -> str | None:
     return None
 
 
-# Remote-start climate. Field names and rules are from the HondaLink Android app
-# (docs/hondalink-protocol/android-crosscheck.md sections J and K); none of it has been
-# confirmed against the live service yet.
-#
-# The app keeps the owner's climate choices in the account profile
-# (GET /REST/NGT/myProfile/1.0/{VIN}) under these keys, and copies them into the
-# engine-start body as vehicleControl.acSetting.
-SAVED_CLIMATE_KEYS = (
-    "temperatureValue",
-    "acDefrosterFront",
-    "acDefrosterRear",
-    "acDriverHeated",
-    "acPassengerHeater",
-    "acHeaterSteering",
-)
-_SAVED_CLIMATE_UNIT_KEYS = ("unit", "tempUnit", "temperatureUnit")
+# Remote-start climate. The request shape is from a capture of the HondaLink Android app
+# remote-starting this car (docs/hondalink-protocol/android-crosscheck.md section M).
+CLIMATE_OFF = "off"
+CLIMATE_DEFROST = "defrost"
+# What Home Assistant offers. "off" sends the start with no climate block, as before.
+REMOTE_START_CLIMATE_OPTIONS = (CLIMATE_OFF, CLIMATE_DEFROST)
+# The app's three temperature choices (degrees F) and the level code each is believed to
+# send as acTempVal. Only "04" has been seen on the wire (with the defroster selected); the
+# mapping is from the app's code and is NOT confirmed, so HA does not offer these yet.
+UNVERIFIED_CLIMATE_TEMP_CODES = {"67": "05", "72": "04", "77": "03"}
+SAVED_CLIMATE_SETTINGS_ID = "REMOTECLIMATESETTINGS"
 
 
-def saved_climate_settings(profile: Any) -> dict[str, Any]:
-    """Find the saved climate settings anywhere in a myProfile reply.
+def remote_start_vehicle_control(mode: Any) -> dict[str, Any] | None:
+    """The vehicleControl block for the engine-start body, or None to send none.
 
-    The reply's layout is not known yet, so this accepts the keys as plain dict keys
-    ({"temperatureValue": "22"}) or as name/value records
-    ({"name": "temperatureValue", "value": "22"}). The temperature unit is taken from the
-    dict that holds the climate keys, and returned as "unit".
+    mode is "off", "defrost", or one of the unverified temperatures "67"/"72"/"77".
     """
-    found: dict[str, Any] = {}
-
-    def walk(node: Any) -> None:
-        if isinstance(node, list):
-            for item in node:
-                walk(item)
-            return
-        if not isinstance(node, dict):
-            return
-        direct = [key for key in SAVED_CLIMATE_KEYS if key in node and not isinstance(node[key], (dict, list))]
-        for key in direct:
-            found.setdefault(key, node[key])
-        if direct:
-            for unit_key in _SAVED_CLIMATE_UNIT_KEYS:
-                if isinstance(node.get(unit_key), str):
-                    found.setdefault("unit", node[unit_key])
-                    break
-        named = [value for value in node.values() if isinstance(value, str) and value in SAVED_CLIMATE_KEYS]
-        if len(named) == 1:
-            for key, value in node.items():
-                if "value" in str(key).lower() and not isinstance(value, (dict, list)) and value != named[0]:
-                    found.setdefault(named[0], value)
-                    break
-        for value in node.values():
-            walk(value)
-
-    walk(profile)
-    return found
-
-
-def _java_round(value: float) -> int:
-    # Java's Math.round: halves go up. Python's round() sends them to the even number.
-    return int((value + 0.5) // 1)
-
-
-def app_ac_temp_val(saved_value: Any, unit: Any, country: str = "US") -> str | None:
-    """The acTempVal the app would send for a saved temperature (its ak/d.i helper).
-
-    For a US car the app converts the saved value from Celsius to Fahrenheit unless the
-    saved unit is Celsius; for a Canadian car it converts Fahrenheit to Celsius when the
-    saved unit is Fahrenheit. Other values pass through.
-    """
-    number = to_float(saved_value)
-    if number is None:
+    mode = str(mode or CLIMATE_OFF).strip().lower()
+    if mode == CLIMATE_OFF:
         return None
-    unit_text = str(unit or "").lower()
-    if str(country or "").upper() == "CA":
-        if "f" in unit_text:
-            number = (number - 32) * 5 / 9
-    elif "c" not in unit_text:
-        number = number * 9 / 5 + 32
-    return str(_java_round(number))
+    if mode == CLIMATE_DEFROST:
+        # Exactly what the app sent with the defroster chosen in its Climate Settings.
+        return {
+            "acSetting": {"acDefSetting": "autoOn", "acTempVal": "04"},
+            "acTemporarySetting": {"acDefSetting": "manualOn"},
+        }
+    if mode in UNVERIFIED_CLIMATE_TEMP_CODES:
+        return {"acSetting": {"acDefSetting": "autoOn", "acTempVal": UNVERIFIED_CLIMATE_TEMP_CODES[mode]}}
+    raise ValueError(f"Unknown remote start climate mode: {mode!r}")
 
 
-def build_ac_setting(
-    *,
-    temperature: Any = None,
-    unit: str = "F",
-    defrost_front: Any = None,
-    defrost_rear: Any = None,
-    seat_heater_driver: Any = None,
-    seat_heater_passenger: Any = None,
-    steering_heater: Any = None,
-) -> dict[str, str] | None:
-    """Build vehicleControl.acSetting for the engine-start body, or None if nothing is set.
+def saved_climate_settings(sync_profile: Any) -> dict[str, Any]:
+    """The climate settings saved from the app, from a SyncSettings profile reply.
 
-    Every value is a string and unset fields are left out, as the app does. temperature is
-    in whole degrees of unit; the other values are sent as given (lower case for the
-    defrosters and steering heater, like the app).
+    They are the SPValues of the REMOTECLIMATESETTINGS entry (the newest, if several),
+    without the VIN: temperatureValue ("67"/"72"/"77" or ""), unit, acDefrosterFront,
+    acDefrosterRear, acDriverHeated, acPassengerHeater, acHeaterSteering ("On"/"Off").
     """
-    setting: dict[str, str] = {}
-    degrees = to_float(temperature)
-    if degrees is not None:
-        setting["acTempVal"] = str(_java_round(degrees))
-        setting["acTempUnit"] = "C" if str(unit or "").strip().upper().startswith("C") else "F"
-    for key, value, lower in (
-        ("acDefFSetting", defrost_front, True),
-        ("acDefRSetting", defrost_rear, True),
-        ("seatHeaterDrSetting", seat_heater_driver, False),
-        ("seatHeaterAsSetting", seat_heater_passenger, False),
-        ("strHeaterSetting", steering_heater, True),
-    ):
-        if value is None or str(value).strip() == "":
+    newest: dict[str, Any] | None = None
+    for setting in _as_list(get_path(sync_profile if isinstance(sync_profile, dict) else {}, "profile.settings")):
+        if not isinstance(setting, dict) or setting.get("SID") != SAVED_CLIMATE_SETTINGS_ID:
             continue
-        setting[key] = str(value).strip().lower() if lower else str(value).strip()
-    return setting or None
+        for detail in _as_list(setting.get("SDetails")):
+            if not isinstance(detail, dict) or not isinstance(detail.get("SPValues"), dict):
+                continue
+            if newest is None or (to_float(detail.get("SPOrder")) or 0) >= (to_float(newest.get("SPOrder")) or 0):
+                newest = detail
+    if newest is None:
+        return {}
+    return {key: value for key, value in newest["SPValues"].items() if str(key).lower() != "vin"}
 
 
-def ac_setting_from_saved(saved: dict[str, Any], country: str = "US") -> dict[str, str] | None:
-    """The acSetting block the app would send for these saved settings."""
-    setting = build_ac_setting(
-        defrost_front=saved.get("acDefrosterFront"),
-        defrost_rear=saved.get("acDefrosterRear"),
-        seat_heater_driver=saved.get("acDriverHeated"),
-        seat_heater_passenger=saved.get("acPassengerHeater"),
-        steering_heater=saved.get("acHeaterSteering"),
-    ) or {}
-    unit = saved.get("unit")
-    temp_val = app_ac_temp_val(saved.get("temperatureValue"), unit, country)
-    if temp_val is not None:
-        temp = {"acTempVal": temp_val, "acTempUnit": "C" if str(unit or "").strip().lower() == "c" else "F"}
-        setting = {**temp, **setting}
-    return setting or None
+def saved_climate_mode(saved: dict[str, Any]) -> str:
+    """The remote_start_vehicle_control mode for the settings saved from the app."""
+    if str(saved.get("acDefrosterFront") or "").strip().lower() == "on":
+        return CLIMATE_DEFROST
+    temperature = str(saved.get("temperatureValue") or "").strip()
+    return temperature if temperature in UNVERIFIED_CLIMATE_TEMP_CODES else CLIMATE_OFF
 
 
 def group_messages(body: dict[str, Any], base: str) -> list[Any]:
@@ -780,6 +710,7 @@ ENTITY_REQUIREMENTS: dict[str, tuple[str | None, Callable[[dict[str, Any]], bool
     "start_engine": (FEATURE_REMOTE_START, None),
     "extend_engine": (FEATURE_REMOTE_START, None),
     "stop_engine": (FEATURE_REMOTE_START, None),
+    "remote_start_climate": (FEATURE_REMOTE_START, None),
     "horn": (FEATURE_FIND_MY_CAR, None),
     "lights": (FEATURE_FIND_MY_CAR, None),
     "stop_horn_lights": (FEATURE_FIND_MY_CAR, None),
