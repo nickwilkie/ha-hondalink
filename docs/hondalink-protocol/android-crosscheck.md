@@ -449,3 +449,36 @@ Not `myProfile` (that reply holds only program enrolments under `devices`), and 
 - `GET /REST/NGT/VehicleMessage/Details/1.0/{VIN}` fails for the app too (HTTP 400/500).
 - `POST /REST/SPT/VehiclePartsHealth/1.0` with `{"vin": ...}` answers, with an empty
   `parts` list for this car.
+
+## N. Seat and steering-wheel heaters: how the app decides (smali, complements M.2)
+
+The capture showed the heater toggles stored in `REMOTECLIMATESETTINGS` but never
+sent on this car's start. The deciding code is the engine-start builder `ak/g`
+(method `g(Ljava/lang/String;)Lcom/honda/common/model/dashboard/request/dashboardcigrequest/CIGPostRequest;`):
+
+| start-body field | source (`ClimateSettingCommandDataInfo`) | feature gate |
+|---|---|---|
+| `strHeaterSetting` | `getAcHeaterSteering()` | `jk/g.t(vin, 1)` |
+| `seatHeaterDrSetting` | `getAcDriverHeated()` | `jk/g.t(vin, 4)` |
+| `seatHeaterAsSetting` | `getAcPassengerHeater()` | `jk/g.t(vin, 5)` |
+
+- When the gate is on, the value is copied **verbatim** — no `toLowerCase`, no
+  re-mapping. Since the settings record stores `"On"`/`"Off"` (M.2), a gated-on
+  vehicle would send `"seatHeaterDrSetting":"On"` on the wire. §J.2's
+  lower-cased `off`/`on` guess does not apply to the seat fields.
+- When the gate is off, the setter is still called — with `null` — and Gson omits
+  null fields. That is exactly the M.1 capture: no seat/steering keys at all in
+  this car's `acSetting`.
+- `jk/g.t(vin, N)` reads the per-vehicle feature map (R-Info flags), so the same
+  APK sends seat heaters for some vehicles and never for others. On the 2025
+  CR-V Hybrid all three gates (1, 4, 5) are off — as is the defroster-to-
+  `acDefFSetting` gate of §J — which is why this car speaks the legacy vocabulary
+  of §M end to end.
+
+Practical consequence for HA: there is **no separate heater API** — the toggles
+exist only as stored settings, and the only command that can carry them is the
+engine-start `acSetting`, which the app itself stops populating on this platform.
+An integration may still add `"seatHeaterDrSetting"/"seatHeaterAsSetting"/
+"strHeaterSetting":"On"|"Off"` to the start body (the server accepts modeled
+fields), but no evidence shows the car acts on them when the app never sends
+them; treat as an on-car experiment, not a documented behavior.
