@@ -14,6 +14,28 @@
 This fork ([nickwilkie/ha-hondalink](https://github.com/nickwilkie/ha-hondalink)) adapts
 [daviddelahoz/ha-hondalink](https://github.com/daviddelahoz/ha-hondalink) to a 2025 CR-V Hybrid (MY21 telematics).
 
+Changes in 0.7.0:
+
+- New `hondalink.remote_start` action for automations and scripts. Every field is optional:
+  - `climate`: `off`, `67`, `72`, `77` or `defrost` for this start. Left out, it uses the
+    **Remote start climate** setting.
+  - `auto_extend`: send the extension after 8 minutes if the remote start is still running,
+    for 20 minutes in total.
+  - `stop_after`: stop the engine after this many minutes (1 to 20). More than 10 extends
+    automatically.
+  - `device_id`: which car, if more than one is set up.
+
+  ```yaml
+  action: hondalink.remote_start
+  data:
+    climate: defrost
+    stop_after: 15
+  ```
+
+  The extension and stop are timers inside Home Assistant: they are cancelled by **Stop
+  engine**, by another start from Home Assistant, and by a restart of Home Assistant. The
+  extension is only sent if the car still reports the remote start as running.
+
 Changes in 0.6.0:
 
 - New **Remote start climate** setting (under the car's Configuration entities):

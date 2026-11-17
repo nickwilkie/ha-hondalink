@@ -65,3 +65,8 @@ RECALLS_URL = "https://content.services.honda.com/recalls/GetRecalls.ashx"
 DATA_API = "api"
 DATA_COORDINATOR = "coordinator"
 DATA_FEATURES = "features"
+
+SERVICE_REMOTE_START = "remote_start"
+ATTR_CLIMATE = "climate"
+ATTR_AUTO_EXTEND = "auto_extend"
+ATTR_STOP_AFTER = "stop_after"

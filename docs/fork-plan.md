@@ -69,6 +69,9 @@ All read from the fixture paths; add translation entries and keep keys snake_cas
 
 ## Later (not in this round)
 - The start command accepts `extend: true` (see `api.py`), which no button uses yet.
+- `hondalink.remote_start` action (0.7.0): climate, automatic extension and run time for
+  automations. Registered in `__init__.async_setup`; the timing rules are
+  `util.remote_start_schedule`, the timers live in the coordinator.
 - Remote-start climate: done in 0.6.0. The **Remote start climate** select (Car default,
   67/72/77 F, Defrost) is sent with Start engine and Extend remote start. Every request
   is copied from captures of the app (`docs/hondalink-protocol/android-crosscheck.md`

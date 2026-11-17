@@ -102,5 +102,40 @@
     "device_tracker": {
       "location": {"name": "Location"}
     }
+  },
+  "selector": {
+    "remote_start_climate": {
+      "options": {
+        "off": "Car default",
+        "67": "67 °F",
+        "72": "72 °F",
+        "77": "77 °F",
+        "defrost": "Defrost"
+      }
+    }
+  },
+  "services": {
+    "remote_start": {
+      "name": "Remote start",
+      "description": "Starts the engine remotely, with options for automations. A remote start runs for 10 minutes; one extension adds 10 more.",
+      "fields": {
+        "device_id": {
+          "name": "Vehicle",
+          "description": "The car to start. Not needed when only one HondaLink vehicle is set up."
+        },
+        "climate": {
+          "name": "Climate",
+          "description": "What the climate system does for this start. Leave empty to use the Remote start climate setting."
+        },
+        "auto_extend": {
+          "name": "Extend automatically",
+          "description": "Send the extension after 8 minutes if the remote start is still running, for 20 minutes in total."
+        },
+        "stop_after": {
+          "name": "Stop after",
+          "description": "Stop the engine after this many minutes (1 to 20). More than 10 extends automatically."
+        }
+      }
+    }
   }
 }

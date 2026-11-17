@@ -1,0 +1,32 @@
+remote_start:
+  fields:
+    device_id:
+      required: false
+      selector:
+        device:
+          integration: hondalink
+    climate:
+      required: false
+      selector:
+        select:
+          translation_key: remote_start_climate
+          options:
+            - "off"
+            - "67"
+            - "72"
+            - "77"
+            - "defrost"
+    auto_extend:
+      required: false
+      default: false
+      selector:
+        boolean:
+    stop_after:
+      required: false
+      selector:
+        number:
+          min: 1
+          max: 20
+          step: 1
+          unit_of_measurement: min
+          mode: box
