@@ -92,6 +92,9 @@
         "name": "Remote start climate",
         "state": {
           "off": "Car default",
+          "67": "67 °F",
+          "72": "72 °F",
+          "77": "77 °F",
           "defrost": "Defrost"
         }
       }

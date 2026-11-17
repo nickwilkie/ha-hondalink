@@ -414,10 +414,11 @@ POST https://wsc.hondaweb.com/REST/NGT/CIG/eng/async/srt
   This is the "legacy CIG" vocabulary of I.1, not the 2G-X one: `acTempVal` is a level
   code, not degrees. That is why the degrees body in section L got HTTP 500.
 - The extend request is the same body with `"extend": true`.
-- `acTempVal` was `"04"` with the defroster chosen (I.1 had predicted `""`). The codes for
-  the three temperature choices have not been captured. From the app's code they should
-  be 67 -> `"05"` (cool), 72 -> `"04"` (normal), 77 -> `"03"` (warm), probably with
-  `acDefSetting: "autoOn"` and no `acTemporarySetting` -- unconfirmed.
+- `acTempVal` was `"04"` with the defroster chosen (I.1 had predicted `""`).
+- With a temperature chosen instead, a second capture showed `vehicleControl` is just
+  `{"acSetting": {"acDefSetting": "autoOn", "acTempVal": <code>}}`, with no
+  `acTemporarySetting`: 67 F -> `"05"`, 72 F -> `"04"`, 77 F -> `"03"`. All four choices
+  got `status: Success`.
 - Stop, lock (`alk`), unlock (`dulk`) send `{device, pin}` only, as the integration does.
 - The `cigServiceRequestId` equals the request's `hondaHeaderType.messageId` header. The
   app also sends `hondaHeaderType.role: PRIMARY` on commands.

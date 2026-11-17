@@ -61,10 +61,12 @@ def test_remote_start_vehicle_control() -> None:
         util.remote_start_vehicle_control("70")
 
 
-def test_home_assistant_offers_only_confirmed_modes() -> None:
-    assert util.REMOTE_START_CLIMATE_OPTIONS == ("off", "defrost")
+def test_home_assistant_options() -> None:
+    assert util.REMOTE_START_CLIMATE_OPTIONS == ("off", "67", "72", "77", "defrost")
     for option in util.REMOTE_START_CLIMATE_OPTIONS:
         util.remote_start_vehicle_control(option)
+    states = json.loads((ROOT / "translations" / "en.json").read_text())["entity"]["select"]["remote_start_climate"]["state"]
+    assert set(states) == set(util.REMOTE_START_CLIMATE_OPTIONS)
 
 
 # The settings saved from the app
@@ -90,6 +92,19 @@ def test_saved_climate_settings_takes_the_newest_entry() -> None:
     saved = util.saved_climate_settings(profile)
     assert saved == {"temperatureValue": "77", "acDefrosterFront": "Off"}
     assert util.saved_climate_mode(saved) == "77"
+
+
+@pytest.mark.parametrize(
+    ("mode", "ac_temp_val"),
+    [("67", "05"), ("72", "04"), ("77", "03")],
+)
+def test_start_engine_with_a_temperature_matches_the_app(mode: str, ac_temp_val: str) -> None:
+    api = _StubAPI([ACCEPTED, DONE])
+    asyncio.run(api.async_start_engine(vehicle_control=util.remote_start_vehicle_control(mode)))
+    assert api.requests[0][2] == {
+        "device": "VIN", "pin": "1234", "extend": False,
+        "vehicleControl": {"acSetting": {"acDefSetting": "autoOn", "acTempVal": ac_temp_val}},
+    }
 
 
 @pytest.mark.parametrize("reply", [None, {}, {"profile": {}}, {"profile": {"settings": [{"SID": "USERDATA"}]}}])

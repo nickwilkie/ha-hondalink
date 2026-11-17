@@ -407,31 +407,31 @@ def cabin_temperature_unit(body: dict[str, Any]) -> str | None:
 # remote-starting this car (docs/hondalink-protocol/android-crosscheck.md section M).
 CLIMATE_OFF = "off"
 CLIMATE_DEFROST = "defrost"
-# What Home Assistant offers. "off" sends the start with no climate block, as before.
-REMOTE_START_CLIMATE_OPTIONS = (CLIMATE_OFF, CLIMATE_DEFROST)
-# The app's three temperature choices (degrees F) and the level code each is believed to
-# send as acTempVal. Only "04" has been seen on the wire (with the defroster selected); the
-# mapping is from the app's code and is NOT confirmed, so HA does not offer these yet.
-UNVERIFIED_CLIMATE_TEMP_CODES = {"67": "05", "72": "04", "77": "03"}
+# The app's three temperature choices (degrees F) and the level code each sends as
+# acTempVal, each seen in the capture.
+CLIMATE_TEMP_CODES = {"67": "05", "72": "04", "77": "03"}
+# What Home Assistant offers; the same either/or choice as the app's Climate Settings.
+# "off" sends the start with no climate block, as before.
+REMOTE_START_CLIMATE_OPTIONS = (CLIMATE_OFF, *CLIMATE_TEMP_CODES, CLIMATE_DEFROST)
 SAVED_CLIMATE_SETTINGS_ID = "REMOTECLIMATESETTINGS"
 
 
 def remote_start_vehicle_control(mode: Any) -> dict[str, Any] | None:
     """The vehicleControl block for the engine-start body, or None to send none.
 
-    mode is "off", "defrost", or one of the unverified temperatures "67"/"72"/"77".
+    mode is "off", "defrost", or a temperature: "67", "72" or "77". Each block is exactly
+    what the app sent for that choice.
     """
     mode = str(mode or CLIMATE_OFF).strip().lower()
     if mode == CLIMATE_OFF:
         return None
     if mode == CLIMATE_DEFROST:
-        # Exactly what the app sent with the defroster chosen in its Climate Settings.
         return {
             "acSetting": {"acDefSetting": "autoOn", "acTempVal": "04"},
             "acTemporarySetting": {"acDefSetting": "manualOn"},
         }
-    if mode in UNVERIFIED_CLIMATE_TEMP_CODES:
-        return {"acSetting": {"acDefSetting": "autoOn", "acTempVal": UNVERIFIED_CLIMATE_TEMP_CODES[mode]}}
+    if mode in CLIMATE_TEMP_CODES:
+        return {"acSetting": {"acDefSetting": "autoOn", "acTempVal": CLIMATE_TEMP_CODES[mode]}}
     raise ValueError(f"Unknown remote start climate mode: {mode!r}")
 
 
@@ -461,7 +461,7 @@ def saved_climate_mode(saved: dict[str, Any]) -> str:
     if str(saved.get("acDefrosterFront") or "").strip().lower() == "on":
         return CLIMATE_DEFROST
     temperature = str(saved.get("temperatureValue") or "").strip()
-    return temperature if temperature in UNVERIFIED_CLIMATE_TEMP_CODES else CLIMATE_OFF
+    return temperature if temperature in CLIMATE_TEMP_CODES else CLIMATE_OFF
 
 
 def group_messages(body: dict[str, Any], base: str) -> list[Any]:

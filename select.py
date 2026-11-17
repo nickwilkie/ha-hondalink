@@ -30,7 +30,7 @@ class HondaLinkRemoteStartClimateSelect(HondaLinkEntity, SelectEntity, RestoreEn
 
     _attr_translation_key = REMOTE_START_CLIMATE_KEY
     _attr_entity_category = EntityCategory.CONFIG
-    _attr_icon = "mdi:car-defrost-front"
+    _attr_icon = "mdi:air-conditioner"
     _attr_options = list(REMOTE_START_CLIMATE_OPTIONS)
 
     def __init__(self, coordinator: HondaLinkDataUpdateCoordinator, entry: ConfigEntry) -> None:

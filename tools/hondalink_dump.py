@@ -44,8 +44,8 @@ expect most attempts to fail; probe_summary.txt shows which ones didn't.
 --start-climate REMOTE-STARTS THE CAR with a climate block attached, in the form the
 HondaLink app sends (docs/hondalink-protocol/android-crosscheck.md section M). Only run it
 with the car outdoors and where you can see it. Give it:
-  defrost   the block the app sends with the defroster chosen (seen in a capture)
-  67|72|77  a temperature in F; the level code sent for it is a guess, not yet confirmed
+  defrost   the block the app sends with the defroster chosen
+  67|72|77  the block the app sends with that temperature (F) chosen
   saved     whatever is saved from the app's Climate Settings
   plain     no climate block: the start the integration has always sent
 --start-extra JSON merges more fields into the request, to try other body shapes without

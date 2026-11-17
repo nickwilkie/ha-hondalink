@@ -69,10 +69,8 @@ All read from the fixture paths; add translation entries and keep keys snake_cas
 
 ## Later (not in this round)
 - The start command accepts `extend: true` (see `api.py`), which no button uses yet.
-- Remote-start climate. 0.6.0 adds the **Remote start climate** select (Car default /
-  Defrost), sent with Start engine and Extend remote start. The request is copied from a
-  capture of the app (`docs/hondalink-protocol/android-crosscheck.md` section M).
-  Still to do: the three temperature choices (67/72/77 F). Their `acTempVal` codes in
-  `util.UNVERIFIED_CLIMATE_TEMP_CODES` are from the app's code, not a capture; once a
-  capture (or `tools/hondalink_dump.py --start-climate 72` plus a look at the car)
-  confirms them, add them to `util.REMOTE_START_CLIMATE_OPTIONS` and the translations.
+- Remote-start climate: done in 0.6.0. The **Remote start climate** select (Car default,
+  67/72/77 F, Defrost) is sent with Start engine and Extend remote start. Every request
+  is copied from captures of the app (`docs/hondalink-protocol/android-crosscheck.md`
+  section M). Not done: mirroring the choice saved in the app (SyncSettings), and seat or
+  steering-wheel heaters, which the app stores but did not send for this car.

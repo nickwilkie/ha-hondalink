@@ -17,12 +17,11 @@ This fork ([nickwilkie/ha-hondalink](https://github.com/nickwilkie/ha-hondalink)
 Changes in 0.6.0:
 
 - New **Remote start climate** setting (under the car's Configuration entities):
-  `Car default` or `Defrost`. With `Defrost`, **Start engine** and **Extend remote start**
-  send the same climate request the HondaLink app sends when the defroster is chosen in its
-  Climate Settings. `Car default` sends the start exactly as before. The choice is kept in
-  Home Assistant; it doesn't change, or read, the setting saved in the app.
-- The app's temperature choices (67/72/77 °F) are not offered yet: the codes they send
-  haven't been confirmed.
+  `Car default`, `67 °F`, `72 °F`, `77 °F` or `Defrost`, the same choices as the HondaLink
+  app's Climate Settings. **Start engine** and **Extend remote start** then send the same
+  climate request the app sends for that choice. `Car default` sends the start exactly as
+  before. The choice is kept in Home Assistant; it doesn't change, or read, the setting
+  saved in the app.
 
 Changes in 0.5.0:
 
