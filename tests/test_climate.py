@@ -310,3 +310,38 @@ def test_tool_offers_plain_start_as_control_after_a_refusal(monkeypatch, tmp_pat
     record = json.loads((out / "start_climate.json").read_text())
     assert "HTTP 500" in record["error"]
     assert record["control_result"]["request_id"] == "req-1"
+
+
+# The remote_start service's follow-up schedule
+
+
+@pytest.mark.parametrize(
+    ("auto_extend", "stop_after", "expected"),
+    [
+        (False, None, (None, None)),
+        (True, None, (8, None)),
+        (False, 5, (None, 5)),
+        (True, 5, (None, 5)),  # stopping before the first 10 minutes end: nothing to extend
+        (False, 10, (None, None)),  # the engine stops by itself at 10
+        (False, 15, (8, 15)),  # more than 10 minutes needs the extension
+        (True, 20, (8, None)),
+        (False, "12", (8, 12)),
+    ],
+)
+def test_remote_start_schedule(auto_extend: bool, stop_after: Any, expected: tuple[Any, Any]) -> None:
+    assert util.remote_start_schedule(auto_extend, stop_after) == expected
+
+
+@pytest.mark.parametrize("stop_after", [0, 21, -3, "soon"])
+def test_remote_start_schedule_rejects_bad_run_times(stop_after: Any) -> None:
+    with pytest.raises(ValueError):
+        util.remote_start_schedule(False, stop_after)
+
+
+def test_service_description_matches_the_options() -> None:
+    services = (ROOT / "services.yaml").read_text()
+    for option in util.REMOTE_START_CLIMATE_OPTIONS:
+        assert f'- "{option}"' in services
+    translations = json.loads((ROOT / "translations" / "en.json").read_text())
+    assert set(translations["selector"]["remote_start_climate"]["options"]) == set(util.REMOTE_START_CLIMATE_OPTIONS)
+    assert set(translations["services"]["remote_start"]["fields"]) == {"device_id", "climate", "auto_extend", "stop_after"}

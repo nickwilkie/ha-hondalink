@@ -5,13 +5,21 @@ import uuid
 
 import aiohttp
 
+import voluptuous as vol
+
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.const import ATTR_DEVICE_ID, Platform
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
+from homeassistant.helpers.typing import ConfigType
 
 from .api import HondaLinkAPI, HondaLinkError
 from .const import (
+    ATTR_AUTO_EXTEND,
+    ATTR_CLIMATE,
+    ATTR_STOP_AFTER,
     CONF_ACCESS_TOKEN,
     CONF_CLIENT_REG_KEY,
     CONF_COUNTRY,
@@ -34,9 +42,10 @@ from .const import (
     DEFAULT_LOCK_COMMAND,
     DEFAULT_UNLOCK_COMMAND,
     DOMAIN,
+    SERVICE_REMOTE_START,
 )
 from .coordinator import HondaLinkDataUpdateCoordinator
-from .util import feature_ids
+from .util import REMOTE_START_CLIMATE_OPTIONS, REMOTE_START_MAX_MINUTES, feature_ids
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,6 +57,50 @@ PLATFORMS: list[Platform] = [
     Platform.SELECT,
     Platform.DEVICE_TRACKER,
 ]
+
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+REMOTE_START_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_DEVICE_ID): cv.string,
+        # YAML turns a bare 72 into a number, so accept that for the temperatures.
+        vol.Optional(ATTR_CLIMATE): vol.All(vol.Coerce(str), vol.Lower, vol.In(REMOTE_START_CLIMATE_OPTIONS)),
+        vol.Optional(ATTR_AUTO_EXTEND, default=False): cv.boolean,
+        vol.Optional(ATTR_STOP_AFTER): vol.All(vol.Coerce(int), vol.Range(min=1, max=REMOTE_START_MAX_MINUTES)),
+    }
+)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    async def remote_start(call: ServiceCall) -> None:
+        coordinator = _coordinator_for_call(hass, call)
+        await coordinator.async_remote_start(
+            climate=call.data.get(ATTR_CLIMATE),
+            auto_extend=call.data[ATTR_AUTO_EXTEND],
+            stop_after=call.data.get(ATTR_STOP_AFTER),
+        )
+
+    hass.services.async_register(DOMAIN, SERVICE_REMOTE_START, remote_start, schema=REMOTE_START_SCHEMA)
+    return True
+
+
+def _coordinator_for_call(hass: HomeAssistant, call: ServiceCall) -> HondaLinkDataUpdateCoordinator:
+    """The car a service call is for: the given device, or the only car set up."""
+    coordinators = [data[DATA_COORDINATOR] for data in hass.data.get(DOMAIN, {}).values()]
+    device_id = call.data.get(ATTR_DEVICE_ID)
+    if device_id:
+        device = dr.async_get(hass).async_get(device_id)
+        vins = {identifier[1] for identifier in device.identifiers if identifier[0] == DOMAIN} if device else set()
+        for coordinator in coordinators:
+            if coordinator.vin in vins:
+                return coordinator
+        raise ServiceValidationError(f"{device_id} is not a HondaLink vehicle that is set up")
+    if len(coordinators) == 1:
+        return coordinators[0]
+    if not coordinators:
+        raise ServiceValidationError("No HondaLink vehicle is set up")
+    raise ServiceValidationError("More than one HondaLink vehicle is set up: choose one with device_id")
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -126,5 +179,7 @@ async def _async_load_features(hass: HomeAssistant, entry: ConfigEntry, api: Hon
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id, None)
+        data = hass.data[DOMAIN].pop(entry.entry_id, None)
+        if data:
+            data[DATA_COORDINATOR].cancel_remote_start_schedule()
     return unload_ok

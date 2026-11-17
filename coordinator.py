@@ -8,8 +8,9 @@ from typing import Any
 import aiohttp
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import HondaLinkAPI, HondaLinkCommandError, HondaLinkError
@@ -21,7 +22,16 @@ from .const import (
     ENROLLMENT_CHECK_INTERVAL,
     RECALL_CHECK_INTERVAL,
 )
-from .util import CLIMATE_OFF, enrollment_status, open_recalls, recall_campaigns, remote_start_vehicle_control
+from .util import (
+    CLIMATE_OFF,
+    enrollment_status,
+    open_recalls,
+    recall_campaigns,
+    remote_engine_running,
+    remote_start_schedule,
+    remote_start_vehicle_control,
+    status_body,
+)
 
 # Errors from the slow side checks (enrollment, recalls). They are logged and the last
 # known value is kept; they never fail the dashboard update.
@@ -39,6 +49,10 @@ class HondaLinkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         self.recalls: list[dict[str, Any]] = []
         # Chosen with the "Remote start climate" select; sent with every remote start.
         self.remote_start_climate: str = CLIMATE_OFF
+        # Pending automatic extension / stop of the remote start in progress, and the
+        # climate mode that start was sent with.
+        self._remote_start_timers: list[CALLBACK_TYPE] = []
+        self._remote_start_mode: str = CLIMATE_OFF
         self._checked_at: dict[str, float] = {}
         interval = int(entry.options.get(CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL))
         super().__init__(
@@ -100,11 +114,60 @@ class HondaLinkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         await self.async_refresh()
 
     async def async_start_engine(self) -> None:
-        await self._run_command(
-            lambda: self.api.async_start_engine(
-                vehicle_control=remote_start_vehicle_control(self.remote_start_climate)
+        await self.async_remote_start()
+
+    async def async_remote_start(
+        self,
+        *,
+        climate: str | None = None,
+        auto_extend: bool = False,
+        stop_after: float | None = None,
+    ) -> None:
+        """Remote start, optionally followed by an automatic extension and/or stop.
+
+        climate defaults to the "Remote start climate" select. The follow-ups are timers in
+        Home Assistant (see util.remote_start_schedule); a later start or stop from Home
+        Assistant, or a restart of Home Assistant, cancels them.
+        """
+        mode = climate if climate is not None else self.remote_start_climate
+        vehicle_control = remote_start_vehicle_control(mode)
+        extend_at, stop_at = remote_start_schedule(auto_extend, stop_after)
+        self.cancel_remote_start_schedule()
+        await self._run_command(lambda: self.api.async_start_engine(vehicle_control=vehicle_control))
+        self._remote_start_mode = mode
+        if extend_at is not None:
+            self._remote_start_timers.append(async_call_later(self.hass, extend_at * 60, self._async_auto_extend))
+        if stop_at is not None:
+            self._remote_start_timers.append(async_call_later(self.hass, stop_at * 60, self._async_auto_stop))
+
+    @callback
+    def cancel_remote_start_schedule(self) -> None:
+        while self._remote_start_timers:
+            self._remote_start_timers.pop()()
+
+    async def _async_auto_extend(self, _now=None) -> None:
+        # Only extend a remote start that is still running: if someone has stopped the car
+        # or driven off in the meantime, don't risk starting it again.
+        await self.async_force_refresh()
+        if remote_engine_running(status_body(self.data or {})) is not True:
+            _LOGGER.info("HondaLink remote start is no longer running; not extending it")
+            self.cancel_remote_start_schedule()
+            return
+        try:
+            await self._run_command(
+                lambda: self.api.async_start_engine(
+                    extend=True, vehicle_control=remote_start_vehicle_control(self._remote_start_mode)
+                )
             )
-        )
+        except HomeAssistantError as err:
+            _LOGGER.warning("HondaLink automatic remote start extension failed: %s", err)
+
+    async def _async_auto_stop(self, _now=None) -> None:
+        self._remote_start_timers.clear()
+        try:
+            await self._run_command(self.api.async_stop_engine)
+        except HomeAssistantError as err:
+            _LOGGER.warning("HondaLink automatic engine stop failed: %s", err)
 
     async def async_extend_engine(self) -> None:
         # The app's "add 10 minutes": the start command with extend set. The car allows one
@@ -116,6 +179,7 @@ class HondaLinkDataUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         )
 
     async def async_stop_engine(self) -> None:
+        self.cancel_remote_start_schedule()
         await self._run_command(self.api.async_stop_engine)
 
     async def async_lock(self) -> None:

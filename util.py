@@ -414,6 +414,29 @@ CLIMATE_TEMP_CODES = {"67": "05", "72": "04", "77": "03"}
 # "off" sends the start with no climate block, as before.
 REMOTE_START_CLIMATE_OPTIONS = (CLIMATE_OFF, *CLIMATE_TEMP_CODES, CLIMATE_DEFROST)
 SAVED_CLIMATE_SETTINGS_ID = "REMOTECLIMATESETTINGS"
+# A remote start runs for 10 minutes; one extension adds 10 more.
+REMOTE_START_RUN_MINUTES = 10
+REMOTE_START_MAX_MINUTES = 2 * REMOTE_START_RUN_MINUTES
+# When an automatic extension is sent: late enough to be worth it, early enough for the
+# command to reach the car before the first 10 minutes end.
+AUTO_EXTEND_AFTER_MINUTES = 8
+
+
+def remote_start_schedule(auto_extend: bool, stop_after: Any = None) -> tuple[float | None, float | None]:
+    """(minutes until the extension is sent, minutes until the stop is sent) for a remote start.
+
+    Either is None when not needed. stop_after is the wanted run time in minutes (1-20);
+    more than 10 needs the extension, so it implies it, and 10 or less never extends. No
+    stop is sent when stop_after is when the engine would stop by itself anyway.
+    """
+    if stop_after is None:
+        return (AUTO_EXTEND_AFTER_MINUTES if auto_extend else None), None
+    minutes = to_float(stop_after)
+    if minutes is None or not 1 <= minutes <= REMOTE_START_MAX_MINUTES:
+        raise ValueError(f"stop_after must be 1 to {REMOTE_START_MAX_MINUTES} minutes, not {stop_after!r}")
+    extend = minutes > REMOTE_START_RUN_MINUTES
+    natural_end = REMOTE_START_MAX_MINUTES if extend else REMOTE_START_RUN_MINUTES
+    return (AUTO_EXTEND_AFTER_MINUTES if extend else None), (minutes if minutes < natural_end else None)
 
 
 def remote_start_vehicle_control(mode: Any) -> dict[str, Any] | None:
