@@ -232,3 +232,33 @@ The tests only need `pytest`, not Home Assistant. Run them as `python -m pytest 
 `pytest` from the repo root tries to import the root `__init__.py`, which needs Home Assistant.
 
 HACS and hassfest workflow files are included under `.github/workflows/`.
+
+### Secret scanning
+
+Install [Gitleaks](https://github.com/gitleaks/gitleaks) (on macOS, `brew install gitleaks`),
+then enable the local pre-commit hook once per clone:
+
+```bash
+./scripts/install-git-hooks.sh
+```
+
+The hook scans staged changes locally before each commit, redacts detected secret values,
+and blocks the commit if it finds a match or Gitleaks cannot run. It also covers linked
+worktrees. The installer preserves existing hooks and custom `core.hooksPath` settings;
+if either is present, integrate `.githooks/pre-commit` with that setup manually. After
+updating the tracked hook, update the installed copy as part of your existing hook setup.
+
+To scan all locally available Git history or the current files manually:
+
+```bash
+gitleaks git --log-opts="--all --full-history" --redact=100
+gitleaks dir --redact=100 .
+```
+
+`.github/workflows/gitleaks.yml` also runs Gitleaks-Action on pushes, pull requests,
+and manual dispatch. Action revisions and the scanner version are pinned. Findings
+are redacted in logs; PR comments, report artifact uploads, and job summaries are disabled.
+Local scans do not upload files or findings to an AI provider.
+
+Gitleaks checks for supported secret patterns; a clean scan does not establish that
+VINs, GPS coordinates, emails, PINs, or every possible password have been removed.
